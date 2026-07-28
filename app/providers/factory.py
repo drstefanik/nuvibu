@@ -26,4 +26,6 @@ def get_video_provider(settings: Settings) -> VideoProvider:
         model=settings.veo_model,
         output_gcs_uri=settings.veo_output_gcs_uri,
         credentials_file=settings.google_application_credentials,
+        backend=getattr(settings, "veo_backend", "vertex"),
+        gemini_api_key=getattr(settings, "gemini_api_key", None),
     )

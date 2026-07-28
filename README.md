@@ -14,7 +14,7 @@ L'identità pubblica di lavoro è **Nuvibù**. La direzione visiva corrente usa 
 - bozza originale di testo e metadati;
 - varianti musicali e adattatore ElevenLabs Music;
 - storyboard automatico in scene;
-- adattatore Google Veo con character reference;
+- adattatore Google Veo dual backend (Gemini API o Vertex AI) con character reference;
 - modalità mock offline e senza crediti;
 - montaggio FFmpeg 16:9;
 - Short verticale 9:16;
@@ -24,7 +24,9 @@ L'identità pubblica di lavoro è **Nuvibù**. La direzione visiva corrente usa 
 - raccolta metriche e Growth Lab;
 - SQLite locale, PostgreSQL/Neon in produzione;
 - worker separato per i job lunghi;
-- autenticazione Basic opzionale per la console privata.
+- autenticazione Basic obbligatoria in produzione per la console privata;
+- ripresa delle operazioni Veo e ledger incrementale per evitare duplicazioni di costo;
+- deploy ripetibile su Cloud Run con service account separati.
 
 ### Da validare con gli account reali
 
@@ -90,24 +92,40 @@ PROVIDER_MODE=live
 ELEVENLABS_API_KEY=...
 ELEVENLABS_MUSIC_MODEL=music_v2
 
-GOOGLE_CLOUD_PROJECT=...
+VEO_BACKEND=vertex
+VEO_MODEL=veo-3.1-generate-001
+GOOGLE_CLOUD_PROJECT=nuvibu
 GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/percorso/service-account.json
-VEO_OUTPUT_GCS_URI=gs://nome-bucket/nuvibu/
-VEO_MODEL=veo-3.1-lite-generate-001
+VEO_OUTPUT_GCS_URI=gs://nome-bucket/veo-output/
 ```
 
-Le chiavi e i JSON di servizio non devono entrare nel repository. La cartella `secrets/` conserva soltanto `.gitkeep`.
+Vertex su Cloud Run usa automaticamente l'identità del servizio (Application
+Default Credentials): non servono né una chiave Gemini né una chiave JSON
+permanente. La chiave ElevenLabs va in Secret Manager e soltanto nel worker.
+Nessun segreto deve entrare nel repository o nell'immagine container.
+
+Gemini Developer API resta disponibile come backend opzionale esplicito:
+
+```dotenv
+VEO_BACKEND=gemini
+VEO_MODEL=veo-3.1-fast-generate-preview
+GEMINI_API_KEY=...
+```
+
+Anche la chiave Gemini opzionale va salvata in Secret Manager, mai nel
+repository o nell'immagine.
 
 ### Guardrail costi
 
 ```dotenv
 MAX_ESTIMATED_COST_USD_PER_EPISODE=40
-MAX_MUSIC_VARIANTS=4
-MAX_SCENE_RETRIES=2
+MAX_MUSIC_VARIANTS=1
+MAX_SCENE_RETRIES=0
 ```
 
-La pipeline interrompe il job quando la stima supera il tetto configurato. I costi registrati vanno riconciliati con i pannelli dei provider.
+La pipeline interrompe il job quando la stima supera il tetto configurato. Per
+il pilota Cloud Run imposta anche un massimo di 30 secondi e 10 USD. I costi
+registrati vanno riconciliati con i pannelli dei provider.
 
 ## Collegare YouTube
 
@@ -138,7 +156,27 @@ Una sola esecuzione:
 python scripts/run_worker.py --once
 ```
 
-Il worker incluso è adatto a una singola istanza. Per più worker serve una coda transazionale o un claim PostgreSQL con locking.
+In produzione il worker acquisisce un singolo job PostgreSQL con locking
+`SKIP LOCKED`; ogni esecuzione Cloud Run Job riceve l'ID esatto del job e usa
+`--once`. Operazioni e asset già completati vengono ripresi invece di rigenerati.
+
+## Deploy Cloud Run
+
+Nel progetto Google Cloud `nuvibu`:
+
+```bash
+./deploy/cloud-run.sh
+```
+
+Il comando usa Vertex AI, `us-central1`, ADC e
+`veo-3.1-generate-001`. Per selezionare esplicitamente il backend Gemini:
+
+```bash
+VEO_BACKEND=gemini ./deploy/cloud-run.sh
+```
+
+La procedura completa, inclusi nomi dei segreti e verifica finale, è in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Test
 

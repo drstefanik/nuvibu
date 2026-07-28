@@ -14,7 +14,16 @@ class Base(DeclarativeBase):
 
 settings = get_settings()
 connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
-engine = create_engine(settings.database_url, connect_args=connect_args, pool_pre_ping=True)
+if settings.database_url.startswith("postgresql"):
+    # Neon uses PgBouncer for pooled endpoints; client-side prepared statements
+    # must be disabled when connections can be reassigned between transactions.
+    connect_args["prepare_threshold"] = None
+engine = create_engine(
+    settings.database_url,
+    connect_args=connect_args,
+    pool_pre_ping=True,
+    pool_recycle=300,
+)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 

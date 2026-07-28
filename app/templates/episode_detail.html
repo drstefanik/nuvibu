@@ -4,15 +4,32 @@
 <a class="backlink" href="/">← Tutti gli episodi</a>
 <section class="detail-heading">
   <div><p class="eyebrow">{{ episode.theme|upper }}</p><h1>{{ episode.title }}</h1><p>{{ episode.hook }}</p></div>
-  <div class="status-panel"><span class="status status-{{ episode.status.value }}">{{ episode.status.value.replace('_',' ') }}</span><strong>${{ "%.2f"|format(episode.actual_cost_usd) }}</strong><small>costo provider registrato</small></div>
+  <div class="status-panel"><span class="status status-{{ episode.status.value }}">{{ episode.status.value.replace('_',' ') }}</span><strong>${{ "%.2f"|format(episode.actual_cost_usd) }}</strong><small>registrato • stima ${{ "%.2f"|format(estimated_cost) }}</small></div>
 </section>
 <section class="action-bar">
-  <form action="/episodes/{{ episode.id }}/run" method="post"><select name="through_step"><option value="lyrics">Solo testo</option><option value="music">Fino alla musica</option><option value="storyboard">Fino allo storyboard</option><option value="scenes">Fino alle scene</option><option value="render">Render completo</option><option value="qc" selected>Render + QC</option></select><button class="button button-primary">Esegui ora</button></form>
+  {% if settings.app_env != 'production' %}<form action="/episodes/{{ episode.id }}/run" method="post"><select name="through_step"><option value="lyrics">Solo testo</option><option value="music">Fino alla musica</option><option value="storyboard">Fino allo storyboard</option><option value="scenes">Fino alle scene</option><option value="render">Render completo</option><option value="qc" selected>Render + QC</option></select><button class="button button-primary">Esegui ora</button></form>{% endif %}
   <form action="/episodes/{{ episode.id }}/run" method="post"><input type="hidden" name="through_step" value="qc"><input type="hidden" name="queued" value="true"><button class="button">Accoda al worker</button></form>
   {% if episode.qc_json.get('passed') and episode.status.value != 'approved' %}<form action="/episodes/{{ episode.id }}/approve" method="post"><button class="button button-success">Approva finale</button></form>{% endif %}
-  {% if episode.status.value == 'approved' %}<form action="/episodes/{{ episode.id }}/youtube" method="post"><button class="button button-success">Carica privato su YouTube</button></form>{% endif %}
-  {% if episode.publish_records %}<form action="/episodes/{{ episode.id }}/analytics/sync" method="post"><button class="button">Sincronizza Analytics</button></form>{% endif %}
+  {% if settings.youtube_enabled and episode.status.value == 'approved' %}<form action="/episodes/{{ episode.id }}/youtube" method="post"><button class="button button-success">Carica privato su YouTube</button></form>{% endif %}
+  {% if settings.youtube_enabled and episode.publish_records %}<form action="/episodes/{{ episode.id }}/analytics/sync" method="post"><button class="button">Sincronizza Analytics</button></form>{% endif %}
 </section>
+{% if jobs %}
+<section class="panel">
+  <div class="panel-title"><div><p class="eyebrow">WORKER</p><h2>Stato produzione</h2></div></div>
+  <div class="asset-table">
+    {% for job in jobs %}
+    <div class="asset-row">
+      <span class="status status-{{ job.status.value }}">{{ job.status.value }}</span>
+      <span>{{ job.job_type }}</span>
+      <span>#{{ job.attempt }}</span>
+      <span>{{ job.started_at or 'in attesa' }}</span>
+      <span>{{ job.error_text or '—' }}</span>
+      <a href="/api/jobs/{{ job.id }}">JSON</a>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
 <section class="detail-grid">
   <article class="panel"><div class="panel-title"><div><p class="eyebrow">SPECIFICHE</p><h2>Brief</h2></div></div>
     <dl class="specs"><div><dt>Target</dt><dd>{{ episode.age_min_months }}–{{ episode.age_max_months }} mesi</dd></div><div><dt>Durata</dt><dd>{{ episode.duration_seconds }} secondi</dd></div><div><dt>Tempo</dt><dd>{{ episode.bpm }} BPM</dd></div><div><dt>Lingua</dt><dd>{{ episode.language|upper }}</dd></div></dl>
@@ -23,7 +40,7 @@
   </article>
 </section>
 <section class="panel"><div class="panel-title"><div><p class="eyebrow">COERENZA PERSONAGGIO</p><h2>Frame di riferimento</h2></div></div>
-  <p class="muted">Carica una tavola approvata. In modalità live viene passata a Veo come primo frame, riducendo le variazioni del personaggio.</p>
+  <p class="muted">Carica una tavola approvata. In modalità live viene passata a Veo come riferimento del soggetto, per preservare l’aspetto di Nuvibù tra le scene.</p>
   <form class="upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data"><input type="file" name="file" accept="image/png,image/jpeg,image/webp" required><button class="button">Carica riferimento</button></form>
   {% if assets_by_kind.get('character_reference') %}<img class="reference-preview" src="/assets/{{ assets_by_kind.get('character_reference')[0].id }}" alt="Frame personaggio">{% endif %}
 </section>

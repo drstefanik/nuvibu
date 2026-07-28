@@ -35,18 +35,60 @@ def probe(path: Path) -> dict:
     return json.loads(completed.stdout)
 
 
-def concatenate_scenes(scene_paths: list[Path], output_path: Path, target_duration: int) -> None:
+def concatenate_scenes(
+    scene_paths: list[Path],
+    output_path: Path,
+    target_duration: int,
+    *,
+    scene_durations: list[float] | None = None,
+) -> None:
     if not scene_paths:
         raise ValueError("At least one scene is required")
+    if scene_durations is None:
+        scene_durations = [target_duration / len(scene_paths)] * len(scene_paths)
+    if len(scene_durations) != len(scene_paths):
+        raise ValueError("Each scene must have one planned duration")
+    if any(duration <= 0 for duration in scene_durations):
+        raise ValueError("Scene durations must be positive")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    concat_file = output_path.with_suffix(".concat.txt")
-    concat_file.write_text("\n".join(f"file '{p.resolve()}'" for p in scene_paths), encoding="utf-8")
-    run([
-        "ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(concat_file),
-        "-t", str(target_duration), "-vf", "scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p",
-        "-r", "25", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(output_path),
-    ])
-    concat_file.unlink(missing_ok=True)
+    inputs: list[str] = []
+    filters: list[str] = []
+    labels: list[str] = []
+    for index, (path, duration) in enumerate(zip(scene_paths, scene_durations, strict=True)):
+        inputs.extend(["-i", str(path)])
+        label = f"v{index}"
+        labels.append(f"[{label}]")
+        filters.append(
+            f"[{index}:v]trim=start=0:duration={duration:.3f},setpts=PTS-STARTPTS,"
+            "scale=1280:720:force_original_aspect_ratio=decrease,"
+            f"pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25,format=yuv420p[{label}]"
+        )
+    filters.append(f"{''.join(labels)}concat=n={len(scene_paths)}:v=1:a=0[outv]")
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            *inputs,
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[outv]",
+            "-t",
+            str(target_duration),
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-movflags",
+            "+faststart",
+            str(output_path),
+        ]
+    )
 
 
 def mux_music(video_path: Path, music_path: Path, output_path: Path, duration_seconds: int) -> None:
@@ -107,7 +149,7 @@ def _wrap_title(title: str, max_chars: int = 15) -> str:
     return "\n".join(lines[:3])
 
 
-def create_thumbnail(title: str, output_path: Path, seed: int = 0) -> None:
+def create_thumbnail(title: str, output_path: Path, seed: int = 0, *, preview_label: bool = True) -> None:
     """Build a premium mock thumbnail from approved Nuvibù concept art.
 
     Production thumbnails should be generated and art-directed from the episode's final scene
@@ -150,12 +192,13 @@ def create_thumbnail(title: str, output_path: Path, seed: int = 0) -> None:
         )
         draw.text((88, 555), "NUVIBÙ • CANZONI ORIGINALI", font=_font(27, bold=True), fill=(255, 222, 74, 255))
 
-    # Keep mock outputs clearly separate from publish-ready creative.
-    label = "CONCEPT PREVIEW"
-    label_font = _font(22, bold=True)
-    bbox = draw.textbbox((0, 0), label, font=label_font)
-    width = bbox[2] - bbox[0]
-    x = 1280 - width - 54
-    draw.rounded_rectangle((x - 15, 24, 1258, 68), radius=14, fill=(24, 19, 55, 175))
-    draw.text((x, 33), label, font=label_font, fill=(255, 255, 255, 245))
+    if preview_label:
+        # Keep mock outputs clearly separate from publish-ready creative.
+        label = "CONCEPT PREVIEW"
+        label_font = _font(22, bold=True)
+        bbox = draw.textbbox((0, 0), label, font=label_font)
+        width = bbox[2] - bbox[0]
+        x = 1280 - width - 54
+        draw.rounded_rectangle((x - 15, 24, 1258, 68), radius=14, fill=(24, 19, 55, 175))
+        draw.text((x, 33), label, font=label_font, fill=(255, 255, 255, 245))
     image.save(output_path, quality=95)

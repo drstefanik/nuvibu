@@ -1,65 +1,138 @@
 # Deploy produzione
 
-## Scelta consigliata
+La produzione usa:
 
-La generazione video e FFmpeg non sono adatti a funzioni serverless brevi. Usare uno di questi assetti:
+- Cloud Run Service `nuvibu-web` per la console;
+- Cloud Run Job `nuvibu-worker` per provider e FFmpeg;
+- Neon/PostgreSQL per episodi, job e ledger;
+- un bucket Cloud Storage montato su `/mnt/nuvibu`;
+- Secret Manager per tutte le credenziali;
+- Vertex AI con `veo-3.1-generate-001` e autenticazione ADC;
+- ElevenLabs Music.
 
-1. **VPS/Docker con volume persistente**: percorso più semplice per l'MVP.
-2. **Cloud Run**: servizio web + worker separato + Neon/PostgreSQL + bucket Cloud Storage.
-3. **Kubernetes**: solo quando il volume di produzioni lo giustifica.
+Vercel non è necessario per questa architettura.
 
-Vercel può ospitare una landing page pubblica, ma non è il posto corretto per il worker multimediale principale.
+## Prerequisiti
 
-## MVP su VPS
+1. Il progetto Google Cloud deve essere `nuvibu` e avere la fatturazione attiva.
+2. La migrazione `migrations/0001_initial.sql` deve essere applicata a Neon.
+3. Secret Manager deve contenere `elevenlabs-api-key`.
+4. Recuperare da Neon la connection string **pooled** del branch `production`.
+5. Verificare che il progetto abbia accesso e quota per Veo in `us-central1`.
+
+Il deploy predefinito usa Vertex AI tramite l'identità
+`nuvibu-worker@nuvibu.iam.gserviceaccount.com`. Cloud Run fornisce
+automaticamente Application Default Credentials: non creare o scaricare chiavi
+JSON e non impostare `GOOGLE_APPLICATION_CREDENTIALS` in produzione.
+
+## Deploy guidato da Cloud Shell
+
+Aprire Cloud Shell nel progetto `nuvibu`, clonare la repository e lanciare:
 
 ```bash
-git clone REPOSITORY_URL
+git clone https://github.com/drstefanik/nuvibu.git
 cd nuvibu
-cp .env.example .env
-# compilare .env
-docker compose up -d --build
+./deploy/cloud-run.sh
 ```
 
-Montare `storage/` e `secrets/` su volumi persistenti, mettere la console dietro HTTPS e non esporre il worker.
+I valori predefiniti sono:
 
-## Cloud Run
+```dotenv
+GOOGLE_CLOUD_PROJECT=nuvibu
+CLOUD_RUN_REGION=us-central1
+GOOGLE_CLOUD_LOCATION=us-central1
+VEO_BACKEND=vertex
+VEO_MODEL=veo-3.1-generate-001
+```
 
-Componenti:
+Lo script:
 
-- `nuvibu-web`: FastAPI, accesso amministrativo;
-- `nuvibu-worker`: processo `python scripts/run_worker.py`;
-- Neon/PostgreSQL: stato dei job e metadati;
-- Cloud Storage: input, scene e render;
-- Secret Manager: chiavi ElevenLabs, service account e token OAuth;
-- Cloud Logging: errori e durata job.
+- abilita le API necessarie;
+- crea Artifact Registry, bucket e service account separati;
+- chiede in input nascosto la URL Neon e le credenziali della console;
+- crea una chiave applicativa casuale;
+- concede a ogni runtime soltanto i segreti che usa;
+- concede `roles/aiplatform.user` soltanto al worker;
+- crea il service agent Vertex AI e gli concede accesso al solo bucket media;
+- blocca nel deploy le versioni numeriche correnti dei segreti;
+- compila un'immagine dal commit corrente;
+- configura il mount GCS con UID/GID `10001`;
+- configura `VEO_OUTPUT_GCS_URI` nello stesso bucket montato;
+- crea un job con una sola task, un'ora di timeout e zero retry automatici;
+- autorizza il web a eseguire quel job con l'ID esatto del job applicativo;
+- pubblica la console con Basic Auth su HTTPS.
 
-Il codice incluso usa filesystem locale per gli asset. Per scalare orizzontalmente va aggiunto un adapter object-storage oppure montato uno storage condiviso. Non avviare più worker sul database SQLite.
+I retry Cloud Run sono intenzionalmente disattivati: la pipeline salva ogni
+asset completato e l'ID dell'operazione Veo, quindi una ripresa esplicita non
+duplica una generazione pagata.
 
-## Variabili minime live
+## Variabili rilevanti
 
 ```dotenv
 APP_ENV=production
-ADMIN_USERNAME=...
-ADMIN_PASSWORD=...
-SECRET_KEY=...
-DATABASE_URL=postgresql://...
+RUNTIME_ROLE=web|worker
 PROVIDER_MODE=live
-ELEVENLABS_API_KEY=...
-GOOGLE_CLOUD_PROJECT=...
+DATABASE_URL=postgresql://...
+STORAGE_BACKEND=gcs_mount
+STORAGE_ROOT=/mnt/nuvibu
+VEO_BACKEND=vertex
+VEO_MODEL=veo-3.1-generate-001
+GOOGLE_CLOUD_PROJECT=nuvibu
 GOOGLE_CLOUD_LOCATION=us-central1
-GOOGLE_APPLICATION_CREDENTIALS=/secrets/google-service-account.json
-VEO_OUTPUT_GCS_URI=gs://bucket/prefix/
-YOUTUBE_CLIENT_SECRETS_FILE=/secrets/youtube-client-secret.json
-YOUTUBE_TOKEN_FILE=/secrets/youtube-token.json
+VEO_OUTPUT_GCS_URI=gs://nuvibu-media-PROJECT_NUMBER/veo-output/
+MAX_EPISODE_SECONDS=30
+MAX_MUSIC_VARIANTS=1
+MAX_SCENE_RETRIES=0
+MAX_ESTIMATED_COST_USD_PER_EPISODE=10
 ```
 
-## Gate prima del go-live
+Il servizio web non riceve chiavi provider. Il worker riceve soltanto la chiave
+ElevenLabs; Vertex usa ADC. Il worker non riceve le credenziali amministrative
+della console.
 
-- test mock completi;
-- una generazione live musicale verificata parola per parola;
-- una scena live per ogni tipo di movimento;
-- controllo costo effettivo contro il preventivo;
-- OAuth YouTube con upload privato;
-- restore testato del database;
-- chiavi fuori dalla repository;
-- tre episodi pronti prima della prima pubblicazione.
+## Backend Gemini opzionale
+
+Gemini Developer API non è necessaria per il deploy predefinito. Per usarla
+esplicitamente:
+
+1. Importare/selezionare `nuvibu` in Google AI Studio e attivare il piano Gemini
+   API a pagamento.
+2. Creare una nuova authorization key e salvarla in Secret Manager come
+   `gemini-api-key`.
+3. Eseguire:
+
+```bash
+VEO_BACKEND=gemini \
+VEO_MODEL=veo-3.1-fast-generate-preview \
+./deploy/cloud-run.sh
+```
+
+Solo in questa modalità lo script abilita `generativelanguage.googleapis.com`,
+richiede `gemini-api-key` e la espone al worker. Le nuove authorization key
+create da AI Studio sono già limitate a Gemini.
+
+## Verifica dopo il deploy
+
+```bash
+curl -fsS "$(gcloud run services describe nuvibu-web \
+  --project nuvibu --region us-central1 --format='value(status.url)')/healthz"
+
+curl -fsS "$(gcloud run services describe nuvibu-web \
+  --project nuvibu --region us-central1 --format='value(status.url)')/readyz"
+```
+
+La seconda chiamata deve restituire database e storage `ok`. La console richiede
+le credenziali Basic Auth definite durante il deploy.
+
+## Primo pilota
+
+1. Creare un episodio di 20–30 secondi.
+2. Caricare la reference approvata di Nuvibù.
+3. Controllare la stima costo prima di accodare.
+4. Accodare una sola volta e seguire lo stato del worker nella pagina episodio.
+5. Revisionare integralmente testo, audio, scene, Short e QC.
+6. Non pubblicare la thumbnail di concept: resta marcata `CONCEPT PREVIEW`.
+
+YouTube è una fase successiva. Il token OAuth deve stare in un percorso
+scrivibile del bucket montato, perché il client aggiorna il refresh token; non
+va montato come file Secret Manager in sola lettura.

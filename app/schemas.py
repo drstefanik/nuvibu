@@ -11,7 +11,7 @@ class EpisodeCreate(BaseModel):
     age_max_months: int = Field(default=24, ge=1, le=60)
     target_words: list[str] = Field(default_factory=list, max_length=12)
     featured_characters: list[str] = Field(default_factory=lambda: ["Nuvibù"], max_length=6)
-    duration_seconds: int = Field(default=75, ge=15, le=180)
+    duration_seconds: int = Field(default=24, ge=15, le=600)
     bpm: int = Field(default=92, ge=60, le=135)
     visual_pacing: str = Field(default="gentle", pattern=r"^(gentle|medium|energetic)$")
     language: str = Field(default="it", pattern=r"^(it|en)$")

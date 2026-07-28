@@ -5,5 +5,8 @@ __pycache__
 storage
 secrets
 *.db
+.env
+.env.*
+!.env.example
 
 runtime

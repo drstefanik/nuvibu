@@ -3,9 +3,10 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: sqlite:////data/nuvibu.db
+      RUNTIME_ROLE: web
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/nuvibu.db}
       STORAGE_ROOT: /data/storage
-    ports: ["8000:8000"]
+    ports: ["8000:8080"]
     volumes:
       - ./runtime:/data
       - ./secrets:/app/secrets
@@ -13,9 +14,12 @@ services:
     build: .
     env_file: .env
     environment:
-      DATABASE_URL: sqlite:////data/nuvibu.db
+      RUNTIME_ROLE: worker
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/nuvibu.db}
       STORAGE_ROOT: /data/storage
     command: ["python", "scripts/run_worker.py"]
+    healthcheck:
+      disable: true
     volumes:
       - ./runtime:/data
       - ./secrets:/app/secrets

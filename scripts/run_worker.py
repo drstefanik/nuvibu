@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -16,11 +18,30 @@ from app.services.pipeline import PipelineService
 
 
 def process_once() -> bool:
+    requested_job_id = os.getenv("NUVIBU_JOB_ID")
     with SessionLocal() as db:
-        job = db.scalar(select(Job).where(Job.status == JobStatus.PENDING).order_by(Job.created_at.asc()).limit(1))
-        if job is None:
-            return False
-        PipelineService(db, get_settings()).process_job(job)
+        with db.begin():
+            query = select(Job).where(Job.status == JobStatus.PENDING)
+            if requested_job_id:
+                query = query.where(Job.id == requested_job_id)
+            else:
+                query = query.order_by(Job.created_at.asc(), Job.id.asc())
+            job = db.scalar(query.with_for_update(skip_locked=True).limit(1))
+            if job is None:
+                if requested_job_id:
+                    requested = db.get(Job, requested_job_id)
+                    if requested is None:
+                        raise RuntimeError(f"Requested job {requested_job_id} does not exist")
+                    if requested.status == JobStatus.SUCCEEDED:
+                        return False
+                    raise RuntimeError(
+                        f"Requested job {requested_job_id} is {requested.status.value}, not pending"
+                    )
+                return False
+            job.status = JobStatus.RUNNING
+            job.started_at = datetime.now(timezone.utc)
+            job.attempt += 1
+        PipelineService(db, get_settings()).process_job(job, already_claimed=True)
         print(f"Processed job {job.id}: {job.status.value}")
         return True
 
@@ -29,7 +50,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    init_db()
+    settings = get_settings()
+    settings.validate_production(require_dispatch=False)
+    if settings.app_env != "production":
+        init_db()
     if args.once:
         process_once()
         return

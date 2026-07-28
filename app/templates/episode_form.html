@@ -15,7 +15,7 @@
   <div class="field-grid four">
     <label>Età minima<input type="number" name="age_min_months" value="9" min="0" max="48"></label>
     <label>Età massima<input type="number" name="age_max_months" value="48" min="1" max="60"></label>
-    <label>Durata sec<input type="number" name="duration_seconds" value="135" min="15" max="180"></label>
+    <label>Durata sec<input type="number" name="duration_seconds" value="24" min="15" max="{{ settings.max_episode_seconds }}"></label>
     <label>BPM<input type="number" name="bpm" value="112" min="60" max="135"></label>
   </div>
   <div class="field-grid two">

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import base64
+from contextlib import asynccontextmanager
 from dataclasses import asdict
+from datetime import datetime, timezone
 import secrets
 import shutil
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from .config import get_settings
@@ -21,18 +24,63 @@ from .providers.youtube import YouTubeClient
 from .schemas import EpisodeCreate, MetricCreate, PipelineRequest
 from .services.analytics import sync_youtube_metrics
 from .services.growth import calculate_growth_score, latest_metric
-from .services.pipeline import PipelineService, slugify
+from .services.pipeline import (
+    PipelineService,
+    ReferenceChangeConflictError,
+    slugify,
+)
+from .services.worker_dispatch import dispatch_worker_job
 
 settings = get_settings()
-app = FastAPI(title=settings.app_name, version="0.1.0")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    if settings.app_env == "production":
+        settings.validate_production(require_dispatch=True)
+    else:
+        init_db()
+    yield
+
+
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 @app.middleware("http")
-async def optional_basic_auth(request: Request, call_next):
-    if settings.admin_username and settings.admin_password and request.url.path not in {"/health"}:
+async def console_security(request: Request, call_next):
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+            return JSONResponse({"detail": "Cross-site request rejected"}, status_code=403)
+        origin = request.headers.get("origin")
+        allowed_origins = {
+            str(request.base_url).rstrip("/"),
+            settings.app_base_url.rstrip("/"),
+        }
+        if origin and origin.rstrip("/") not in allowed_origins:
+            return JSONResponse({"detail": "Origin rejected"}, status_code=403)
+        referer = request.headers.get("referer")
+        if not origin and referer:
+            parsed = urlsplit(referer)
+            referer_origin = f"{parsed.scheme}://{parsed.netloc}"
+            if referer_origin.rstrip("/") not in allowed_origins:
+                return JSONResponse({"detail": "Referer rejected"}, status_code=403)
+        content_type = request.headers.get("content-type", "").lower()
+        is_browser_form = content_type.startswith(
+            ("application/x-www-form-urlencoded", "multipart/form-data")
+        )
+        if is_browser_form and not origin and not referer:
+            return JSONResponse(
+                {"detail": "Same-origin form proof required"},
+                status_code=403,
+            )
+    if settings.admin_username and settings.admin_password and request.url.path not in {
+        "/health",
+        "/healthz",
+        "/readyz",
+    }:
         auth = request.headers.get("Authorization", "")
         valid = False
         if auth.startswith("Basic "):
@@ -50,11 +98,6 @@ async def optional_basic_auth(request: Request, call_next):
     return await call_next(request)
 
 
-@app.on_event("startup")
-def startup() -> None:
-    init_db()
-
-
 def get_episode_or_404(db: Session, episode_id: str) -> Episode:
     episode = db.get(Episode, episode_id)
     if episode is None:
@@ -70,8 +113,95 @@ def grouped_assets(episode: Episode) -> dict[str, list[Asset]]:
 
 
 @app.get("/health")
+@app.get("/healthz")
 def health() -> dict:
     return {"status": "ok", "provider_mode": settings.provider_mode, "app": settings.app_name}
+
+
+@app.get("/readyz")
+def readiness(db: Session = Depends(get_db)) -> dict:
+    db.execute(text("SELECT 1"))
+    if settings.app_env == "production":
+        errors = settings.production_errors(require_dispatch=True)
+        if errors:
+            raise HTTPException(status_code=503, detail="; ".join(errors))
+        if db.scalar(text("SELECT to_regclass('public.episodes')")) is None:
+            raise HTTPException(status_code=503, detail="Database migration is missing")
+    elif not settings.storage_root.exists() or not settings.storage_root.is_dir():
+        raise HTTPException(status_code=503, detail="Storage is unavailable")
+    return {"status": "ready", "database": "ok", "storage": "ok"}
+
+
+def worker_dispatch_due(
+    job: Job,
+    *,
+    now: datetime | None = None,
+    retry_after_seconds: int | None = None,
+) -> bool:
+    if job.status != JobStatus.PENDING:
+        return False
+    dispatched_at_raw = job.result_json.get("cloud_run_dispatched_at")
+    if not isinstance(dispatched_at_raw, str):
+        return True
+    try:
+        dispatched_at = datetime.fromisoformat(dispatched_at_raw)
+    except ValueError:
+        return True
+    if dispatched_at.tzinfo is None:
+        dispatched_at = dispatched_at.replace(tzinfo=timezone.utc)
+    current_time = now or datetime.now(timezone.utc)
+    retry_after = (
+        retry_after_seconds
+        if retry_after_seconds is not None
+        else settings.cloud_run_dispatch_retry_seconds
+    )
+    return (
+        current_time - dispatched_at
+    ).total_seconds() >= retry_after
+
+
+def enqueue_and_dispatch(db: Session, episode: Episode, through_step: str) -> Job:
+    service = PipelineService(db, settings)
+    if settings.app_env == "production":
+        if through_step in {"scenes", "render", "qc"} and service.character_reference(episode) is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Upload the approved Nuvibù character reference before video generation",
+            )
+        if through_step in {"music", "storyboard", "scenes", "render", "qc"}:
+            try:
+                service.assert_budget(episode)
+            except RuntimeError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            db.commit()
+    job = service.enqueue(episode, through_step)
+    if (
+        settings.app_env == "production"
+        and worker_dispatch_due(job)
+    ):
+        try:
+            operation_name = dispatch_worker_job(settings, job.id)
+        except Exception as exc:
+            job.error_text = f"Worker dispatch failed: {exc}"
+            db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail=f"Job queued but the worker could not be started: {exc}",
+            ) from exc
+        history_value = job.result_json.get("cloud_run_operation_history", [])
+        prior_operations = list(history_value) if isinstance(history_value, list) else []
+        prior_operation = job.result_json.get("cloud_run_operation")
+        if prior_operation and prior_operation not in prior_operations:
+            prior_operations.append(prior_operation)
+        job.result_json = {
+            **job.result_json,
+            "cloud_run_operation": operation_name,
+            "cloud_run_operation_history": prior_operations,
+            "cloud_run_dispatched_at": datetime.now(timezone.utc).isoformat(),
+        }
+        job.error_text = None
+        db.commit()
+    return job
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -96,10 +226,15 @@ def create_episode_form(
     title: str = Form(...), theme: str = Form(...), hook: str = Form(...),
     target_words: str = Form(""), featured_characters: str = Form("Nuvibù"),
     age_min_months: int = Form(6), age_max_months: int = Form(24),
-    duration_seconds: int = Form(75), bpm: int = Form(92),
+    duration_seconds: int = Form(24), bpm: int = Form(92),
     visual_pacing: str = Form("gentle"), language: str = Form("it"),
     db: Session = Depends(get_db),
 ):
+    if duration_seconds > settings.max_episode_seconds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Duration exceeds MAX_EPISODE_SECONDS={settings.max_episode_seconds}",
+        )
     payload = EpisodeCreate(
         title=title, theme=theme, hook=hook,
         target_words=[x.strip() for x in target_words.split(",") if x.strip()],
@@ -122,6 +257,11 @@ def create_episode_form(
 
 @app.post("/api/episodes", status_code=201)
 def create_episode_api(payload: EpisodeCreate, db: Session = Depends(get_db)):
+    if payload.duration_seconds > settings.max_episode_seconds:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Duration exceeds MAX_EPISODE_SECONDS={settings.max_episode_seconds}",
+        )
     base_slug = slugify(payload.title)
     candidate = base_slug
     number = 2
@@ -138,9 +278,23 @@ def create_episode_api(payload: EpisodeCreate, db: Session = Depends(get_db)):
 @app.get("/episodes/{episode_id}", response_class=HTMLResponse)
 def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_db)):
     episode = get_episode_or_404(db, episode_id)
+    estimated_cost = PipelineService(db, settings).estimate_cost(episode)
+    jobs = db.scalars(
+        select(Job)
+        .where(Job.episode_id == episode.id)
+        .order_by(Job.created_at.desc())
+        .limit(5)
+    ).all()
     return templates.TemplateResponse(
         request, "episode_detail.html",
-        {"episode": episode, "assets_by_kind": grouped_assets(episode), "settings": settings, "growth": calculate_growth_score(latest_metric(episode))},
+        {
+            "episode": episode,
+            "assets_by_kind": grouped_assets(episode),
+            "jobs": jobs,
+            "estimated_cost": estimated_cost,
+            "settings": settings,
+            "growth": calculate_growth_score(latest_metric(episode)),
+        },
     )
 
 
@@ -148,12 +302,11 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
 def run_pipeline_form(episode_id: str, through_step: str = Form("qc"), queued: bool = Form(False), db: Session = Depends(get_db)):
     payload = PipelineRequest(through_step=through_step)
     episode = get_episode_or_404(db, episode_id)
-    service = PipelineService(db, settings)
-    if queued:
-        service.enqueue(episode, payload.through_step)
+    if queued or settings.app_env == "production":
+        enqueue_and_dispatch(db, episode, payload.through_step)
     else:
         try:
-            service.run_through(episode, payload.through_step)
+            PipelineService(db, settings).run_through(episode, payload.through_step)
         except Exception as exc:
             episode.status = EpisodeStatus.FAILED
             db.commit()
@@ -164,8 +317,36 @@ def run_pipeline_form(episode_id: str, through_step: str = Form("qc"), queued: b
 @app.post("/api/episodes/{episode_id}/run")
 def run_pipeline_api(episode_id: str, payload: PipelineRequest, db: Session = Depends(get_db)):
     episode = get_episode_or_404(db, episode_id)
+    if settings.app_env == "production":
+        job = enqueue_and_dispatch(db, episode, payload.through_step)
+        return JSONResponse(
+            {
+                "id": episode.id,
+                "job_id": job.id,
+                "job_status": job.status.value,
+                "queued": True,
+            },
+            status_code=202,
+        )
     PipelineService(db, settings).run_through(episode, payload.through_step)
     return {"id": episode.id, "status": episode.status.value, "qc": episode.qc_json}
+
+
+@app.get("/api/jobs/{job_id}")
+def get_job(job_id: str, db: Session = Depends(get_db)):
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {
+        "id": job.id,
+        "episode_id": job.episode_id,
+        "status": job.status.value,
+        "attempt": job.attempt,
+        "error": job.error_text,
+        "result": job.result_json,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+    }
 
 
 @app.post("/episodes/{episode_id}/reference")
@@ -177,7 +358,10 @@ def upload_character_reference(episode_id: str, file: UploadFile = File(...), db
         shutil.copyfileobj(file.file, tmp)
         temp_path = Path(tmp.name)
     try:
-        PipelineService(db, settings).save_character_reference(episode, temp_path)
+        try:
+            PipelineService(db, settings).save_character_reference(episode, temp_path)
+        except ReferenceChangeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     finally:
         temp_path.unlink(missing_ok=True)
     return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
@@ -195,6 +379,8 @@ def approve_episode(episode_id: str, db: Session = Depends(get_db)):
 
 @app.post("/episodes/{episode_id}/youtube")
 def upload_to_youtube(episode_id: str, db: Session = Depends(get_db)):
+    if not settings.youtube_enabled:
+        raise HTTPException(status_code=503, detail="YouTube integration is not enabled")
     episode = get_episode_or_404(db, episode_id)
     if episode.status != EpisodeStatus.APPROVED:
         raise HTTPException(status_code=400, detail="Approve the episode before upload")
@@ -254,6 +440,8 @@ def add_metrics(episode_id: str, payload: MetricCreate, db: Session = Depends(ge
 
 @app.post("/episodes/{episode_id}/analytics/sync")
 def sync_analytics(episode_id: str, db: Session = Depends(get_db)):
+    if not settings.youtube_enabled:
+        raise HTTPException(status_code=503, detail="YouTube integration is not enabled")
     episode = get_episode_or_404(db, episode_id)
     try:
         sync_youtube_metrics(db, settings, episode)
