@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.db
+secrets/*.json
+!secrets/.gitkeep
+storage/assets/*
+!storage/assets/.gitkeep
+storage/renders/*
+!storage/renders/.gitkeep
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+runtime/

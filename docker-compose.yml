@@ -1,0 +1,21 @@
+services:
+  web:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:////data/nuvibu.db
+      STORAGE_ROOT: /data/storage
+    ports: ["8000:8000"]
+    volumes:
+      - ./runtime:/data
+      - ./secrets:/app/secrets
+  worker:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: sqlite:////data/nuvibu.db
+      STORAGE_ROOT: /data/storage
+    command: ["python", "scripts/run_worker.py"]
+    volumes:
+      - ./runtime:/data
+      - ./secrets:/app/secrets

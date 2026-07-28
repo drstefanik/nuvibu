@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Nuvibù Studio{% endblock %}
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">CANALE YOUTUBE AUTONOMO</p>
+    <h1>Canzoni originali.<br>Cartoni che si fanno ricordare.</h1>
+    <p>Da un brief a canzone, storyboard, scene 3D, video 16:9, Short, thumbnail, controllo qualità e upload privato. Ogni episodio parte da un'identità visiva coerente e viene misurato sui dati reali.</p>
+    <a class="button button-primary" href="/episodes/new">Crea il prossimo episodio</a>
+  </div>
+  <div class="hero-visual"><img src="/static/nuvibu-avatar.png" alt="Mascotte Nuvibù"></div>
+</section>
+<section class="stats">
+  <article><strong>{{ stats.episodes }}</strong><span>Episodi</span></article>
+  <article><strong>{{ stats.ready }}</strong><span>Pronti per revisione</span></article>
+  <article><strong>{{ stats.published }}</strong><span>Pubblicati</span></article>
+  <article><strong>{{ "{:,}".format(stats.views).replace(',', '.') }}</strong><span>Visualizzazioni tracciate</span></article>
+</section>
+<div class="section-heading"><div><p class="eyebrow">PRODUZIONE</p><h2>Episodi</h2></div><a class="button" href="/growth">Apri Growth Lab</a></div>
+{% if episodes %}
+<section class="episode-grid">
+{% for episode in episodes %}
+  <a class="episode-card" href="/episodes/{{ episode.id }}">
+    <div class="episode-art theme-{{ loop.index0 % 4 }}"><img src="/static/nuvibu-avatar.png" alt=""></div>
+    <div class="episode-body">
+      <div class="row"><span class="status status-{{ episode.status.value }}">{{ episode.status.value.replace('_',' ') }}</span><small>{{ episode.duration_seconds }} sec</small></div>
+      <h3>{{ episode.title }}</h3><p>{{ episode.hook }}</p>
+      <div class="tags"><span>{{ episode.theme }}</span><span>{{ episode.age_min_months }}–{{ episode.age_max_months }} mesi</span><span>{{ episode.bpm }} BPM</span></div>
+    </div>
+  </a>
+{% endfor %}
+</section>
+{% else %}
+<section class="empty-state"><img class="empty-avatar" src="/static/nuvibu-avatar.png" alt="Nuvibù"><h3>Nessun episodio</h3><p>Il primo brief può diventare un pacchetto completo in modalità mock, senza spendere crediti. Il mock usa concept approvati, ma resta una preview tecnica.</p><a class="button button-primary" href="/episodes/new">Crea il pilota</a></section>
+{% endif %}
+{% endblock %}

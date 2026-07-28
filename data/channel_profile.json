@@ -1,0 +1,33 @@
+{
+  "working_name": "Nuvibù – Canzoni e Avventure per Bambini",
+  "working_handle_preferences": ["@Nuvibu", "@NuvibuKids", "@NuvibuCanzoni"],
+  "clearance_status": "Handle, dominio e marchio devono essere verificati prima del lancio pubblico.",
+  "positioning": "Canzoni originali e piccoli cartoni 3D ad alta riconoscibilità, con personaggi ricorrenti, colori, animali, trasformazioni e baby dance.",
+  "primary_audience": "famiglie con bambini da circa 9 mesi a 4 anni",
+  "secondary_audience": "genitori, caregiver, nidi e scuole dell'infanzia",
+  "channel_description": "Benvenuti nel mondo di Nuvibù: canzoni originali, pulcini colorati, animali, arcobaleni, cucù e piccole avventure da cantare insieme. Nuovi personaggi, grandi sorrisi e una sorpresa in ogni episodio.",
+  "playlists": [
+    "Colori e trasformazioni",
+    "Animali e versi",
+    "Baby Dance con Nuvibù",
+    "Cucù e sorprese",
+    "Nanna con Nuvibù"
+  ],
+  "publishing": {
+    "long_form": "due episodi alla settimana dopo il batch iniziale",
+    "shorts": "uno o due Short derivati per episodio lungo",
+    "launch_batch": 12,
+    "test_window_weeks": 6
+  },
+  "editorial_principles": [
+    "hook visivo entro 2 secondi",
+    "titolo e thumbnail comprensibili a dimensione mobile",
+    "un'azione centrale chiarissima per scena",
+    "personaggi ricorrenti e silhouette bloccate",
+    "musica e testi originali",
+    "ricchezza visiva organizzata, mai sfondi vuoti",
+    "revisione umana prima di ogni upload",
+    "nessuna promessa educativa o medica ingannevole",
+    "nessuna pressione commerciale diretta sui bambini"
+  ]
+}

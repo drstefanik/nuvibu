@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Nuvibù Studio{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/nuvibu-avatar.png">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">
+    <img class="brand-logo" src="/static/nuvibu-avatar.png" alt="Nuvibù">
+    <span><strong>Nuvibù Studio</strong><small>KIDS CONTENT ENGINE</small></span>
+  </a>
+  <nav><a href="/growth">Growth Lab</a><a class="button button-primary" href="/episodes/new">Nuovo episodio</a><span class="mode {{ 'mode-live' if settings.provider_mode == 'live' else '' }}">{{ settings.provider_mode|upper }}</span></nav>
+</header>
+<main class="page">{% block content %}{% endblock %}</main>
+<footer>Console privata • revisione umana obbligatoria • upload YouTube inizialmente privato</footer>
+</body>
+</html>

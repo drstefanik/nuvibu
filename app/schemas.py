@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from pydantic import BaseModel, Field, field_validator
+
+
+class EpisodeCreate(BaseModel):
+    title: str = Field(min_length=3, max_length=180)
+    theme: str = Field(min_length=2, max_length=100)
+    hook: str = Field(min_length=3, max_length=220)
+    age_min_months: int = Field(default=6, ge=0, le=48)
+    age_max_months: int = Field(default=24, ge=1, le=60)
+    target_words: list[str] = Field(default_factory=list, max_length=12)
+    featured_characters: list[str] = Field(default_factory=lambda: ["Nuvibù"], max_length=6)
+    duration_seconds: int = Field(default=75, ge=15, le=180)
+    bpm: int = Field(default=92, ge=60, le=135)
+    visual_pacing: str = Field(default="gentle", pattern=r"^(gentle|medium|energetic)$")
+    language: str = Field(default="it", pattern=r"^(it|en)$")
+
+    @field_validator("age_max_months")
+    @classmethod
+    def validate_age_range(cls, value: int, info):
+        min_age = info.data.get("age_min_months", 0)
+        if value <= min_age:
+            raise ValueError("age_max_months must be greater than age_min_months")
+        return value
+
+
+class PipelineRequest(BaseModel):
+    through_step: str = Field(default="qc", pattern=r"^(lyrics|music|storyboard|scenes|render|qc)$")
+
+
+class MetricCreate(BaseModel):
+    views: int = Field(default=0, ge=0)
+    watch_minutes: float = Field(default=0, ge=0)
+    average_view_duration_seconds: float = Field(default=0, ge=0)
+    average_view_percentage: float = Field(default=0, ge=0, le=100)
+    impressions: int = Field(default=0, ge=0)
+    impressions_ctr: float | None = Field(default=None, ge=0, le=100)
+    subscribers_gained: int = Field(default=0, ge=0)
+    relative_retention: float | None = Field(default=None, ge=0, le=1)
+    retention_curve: list[dict[str, float]] = Field(default_factory=list)

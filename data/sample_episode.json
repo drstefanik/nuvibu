@@ -1,0 +1,13 @@
+{
+  "title": "Pulcini Arcobaleno",
+  "theme": "colori e trasformazioni",
+  "hook": "Sette pulcini saltano in pozze magiche e cambiano colore",
+  "age_min_months": 9,
+  "age_max_months": 48,
+  "target_words": ["rosso", "giallo", "blu", "verde", "rosa", "viola", "bianco"],
+  "featured_characters": ["Nuvibù", "Pulcini Arcobaleno"],
+  "duration_seconds": 135,
+  "bpm": 112,
+  "visual_pacing": "energetic",
+  "language": "it"
+}

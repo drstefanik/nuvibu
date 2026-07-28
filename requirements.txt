@@ -1,0 +1,16 @@
+fastapi==0.128.2
+uvicorn[standard]==0.48.0
+sqlalchemy==2.0.50
+pydantic==2.13.4
+pydantic-settings==2.14.1
+jinja2==3.1.6
+python-multipart==0.0.29
+httpx==0.28.1
+aiofiles==24.1.0
+numpy==2.3.5
+Pillow==12.2.0
+psycopg[binary]>=3.2,<4
+google-api-python-client>=2.180,<3
+google-auth>=2.40,<3
+google-auth-oauthlib>=1.2,<2
+google-cloud-storage>=3.0,<4

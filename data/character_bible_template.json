@@ -1,0 +1,86 @@
+{
+  "working_brand": "Nuvibù",
+  "status": "premium visual direction approved; final production model, handle and trademark clearance still pending",
+  "character": {
+    "name": "Nuvibù",
+    "role": "joyful cloud guide and recurring hero",
+    "silhouette": "compact plush cloud body with five rounded lobes, one curled tuft, tiny rounded hands and short lavender feet",
+    "immutable_features": [
+      "soft white plush cloud body",
+      "single curled tuft centered on top",
+      "large glossy blue-violet eyes with two clear catchlights",
+      "short lavender eyebrows",
+      "round rosy cheeks",
+      "joyful open smile with a small pink tongue and no visible teeth",
+      "two tiny rounded hands",
+      "two short lavender feet",
+      "small rainbow-and-stars emblem on the lower right side of the body"
+    ],
+    "approved_palette": {
+      "body": "#FFFDF7",
+      "eyes_deep": "#17143E",
+      "eyes_blue": "#315BD6",
+      "eyes_violet": "#734ED9",
+      "brows_and_feet": "#7653C9",
+      "cheeks": "#FF8FA3",
+      "rainbow_red": "#FF5F75",
+      "rainbow_orange": "#FFA23C",
+      "rainbow_yellow": "#FFD94E",
+      "rainbow_green": "#73D85A",
+      "rainbow_blue": "#4AB9F4"
+    },
+    "approved_expressions": [
+      "big joyful welcome",
+      "playful surprise",
+      "curious anticipation",
+      "gentle laugh",
+      "sleepy smile",
+      "proud celebration"
+    ],
+    "approved_actions": [
+      "wave with one hand",
+      "clap once or twice",
+      "small rhythmic bounce",
+      "peek from behind a cloud or prop",
+      "lead a simple group dance",
+      "point to a color, animal or object",
+      "land in a clear celebratory pose"
+    ],
+    "forbidden": [
+      "missing or extra limbs",
+      "human fingers with realistic anatomy",
+      "sharp teeth",
+      "asymmetrical or drifting eye design",
+      "different tuft shape",
+      "different chest emblem",
+      "clothing or hats unless explicitly approved for a special episode",
+      "realistic human skin",
+      "dark horror lighting",
+      "brand logos",
+      "text embedded in generated scenes",
+      "flat minimalist smiley-face rendering",
+      "generic clip-art rendering"
+    ]
+  },
+  "rendering_rules": {
+    "style": "premium polished 3D preschool animation with plush materials, soft cinematic lighting and strong mobile readability",
+    "detail": "rich and specific, never empty; one clear focal action with organized supporting details",
+    "color": "vivid, saturated and joyful while preserving clean separation between characters and background",
+    "consistency": "every scene must use the approved character reference or a locked model/LoRA/3D rig"
+  },
+  "camera_rules": {
+    "shot_length_seconds_min": 3,
+    "shot_length_seconds_preferred": 5,
+    "cuts": "clean rhythmic cuts, motivated transitions and occasional smooth push-ins",
+    "movement": "lively but readable; no random camera shake, strobe or aggressive whip-pan",
+    "subject_occupancy": "main character or action should occupy 40–75% of the frame",
+    "first_hook": "a face, reveal or transformation must be visible within the first 2 seconds"
+  },
+  "audio_rules": {
+    "bpm_range": [92, 124],
+    "target_loudness_lufs": -16,
+    "no_abrupt_transients": true,
+    "vocal_style": "warm, clear, energetic and natural; no robotic delivery or exaggerated baby talk",
+    "chorus_rule": "the central hook must be understandable and repeatable after one listen"
+  }
+}

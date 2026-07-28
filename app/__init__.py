@@ -1,0 +1,1 @@
+"""Nuvibù Studio application package."""

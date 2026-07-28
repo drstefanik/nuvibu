@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Growth Lab{% endblock %}
+{% block content %}
+<section class="narrow-heading"><p class="eyebrow">GROWTH LAB</p><h1>Misura. Non indovinare.</h1><p>Il punteggio confronta percentuale vista, retention relativa, CTR e iscritti per mille visualizzazioni. Non è una previsione di viralità.</p></section>
+<section class="panel"><div class="growth-table"><div class="growth-row growth-head"><span>Episodio</span><span>Views</span><span>Vista media</span><span>Punteggio</span><span>Indicazione</span></div>{% for row in rows %}<a class="growth-row" href="/episodes/{{ row.episode.id }}"><span><strong>{{ row.episode.title }}</strong><small>{{ row.episode.theme }}</small></span><span>{{ row.metric.views if row.metric else 0 }}</span><span>{{ ("%.1f%%"|format(row.metric.average_view_percentage)) if row.metric else '—' }}</span><span><strong>{{ row.growth.score }}</strong><small>{{ row.growth.confidence }}</small></span><span>{{ row.growth.recommendation }}</span></a>{% else %}<p class="muted">Nessun episodio disponibile.</p>{% endfor %}</div></section>
+{% endblock %}

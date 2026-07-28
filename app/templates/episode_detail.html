@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ episode.title }}{% endblock %}
+{% block content %}
+<a class="backlink" href="/">← Tutti gli episodi</a>
+<section class="detail-heading">
+  <div><p class="eyebrow">{{ episode.theme|upper }}</p><h1>{{ episode.title }}</h1><p>{{ episode.hook }}</p></div>
+  <div class="status-panel"><span class="status status-{{ episode.status.value }}">{{ episode.status.value.replace('_',' ') }}</span><strong>${{ "%.2f"|format(episode.actual_cost_usd) }}</strong><small>costo provider registrato</small></div>
+</section>
+<section class="action-bar">
+  <form action="/episodes/{{ episode.id }}/run" method="post"><select name="through_step"><option value="lyrics">Solo testo</option><option value="music">Fino alla musica</option><option value="storyboard">Fino allo storyboard</option><option value="scenes">Fino alle scene</option><option value="render">Render completo</option><option value="qc" selected>Render + QC</option></select><button class="button button-primary">Esegui ora</button></form>
+  <form action="/episodes/{{ episode.id }}/run" method="post"><input type="hidden" name="through_step" value="qc"><input type="hidden" name="queued" value="true"><button class="button">Accoda al worker</button></form>
+  {% if episode.qc_json.get('passed') and episode.status.value != 'approved' %}<form action="/episodes/{{ episode.id }}/approve" method="post"><button class="button button-success">Approva finale</button></form>{% endif %}
+  {% if episode.status.value == 'approved' %}<form action="/episodes/{{ episode.id }}/youtube" method="post"><button class="button button-success">Carica privato su YouTube</button></form>{% endif %}
+  {% if episode.publish_records %}<form action="/episodes/{{ episode.id }}/analytics/sync" method="post"><button class="button">Sincronizza Analytics</button></form>{% endif %}
+</section>
+<section class="detail-grid">
+  <article class="panel"><div class="panel-title"><div><p class="eyebrow">SPECIFICHE</p><h2>Brief</h2></div></div>
+    <dl class="specs"><div><dt>Target</dt><dd>{{ episode.age_min_months }}–{{ episode.age_max_months }} mesi</dd></div><div><dt>Durata</dt><dd>{{ episode.duration_seconds }} secondi</dd></div><div><dt>Tempo</dt><dd>{{ episode.bpm }} BPM</dd></div><div><dt>Lingua</dt><dd>{{ episode.language|upper }}</dd></div></dl>
+    <div class="tags top-gap">{% for word in episode.target_words %}<span>{{ word }}</span>{% endfor %}</div>
+  </article>
+  <article class="panel"><div class="panel-title"><div><p class="eyebrow">QUALITY GATE</p><h2>Controllo automatico</h2></div></div>
+    {% if episode.qc_json %}<div class="qc-score {{ 'qc-pass' if episode.qc_json.get('passed') else 'qc-fail' }}"><strong>{{ episode.qc_json.get('score',0) }}</strong><span>/100</span></div>{% if episode.qc_json.get('findings') %}<ul class="findings">{% for finding in episode.qc_json.get('findings') %}<li>{{ finding }}</li>{% endfor %}</ul>{% else %}<p class="good">Nessun rilievo strutturale. Serve comunque revisione editoriale umana.</p>{% endif %}{% else %}<p class="muted">Esegui la pipeline fino al QC.</p>{% endif %}
+  </article>
+</section>
+<section class="panel"><div class="panel-title"><div><p class="eyebrow">COERENZA PERSONAGGIO</p><h2>Frame di riferimento</h2></div></div>
+  <p class="muted">Carica una tavola approvata. In modalità live viene passata a Veo come primo frame, riducendo le variazioni del personaggio.</p>
+  <form class="upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data"><input type="file" name="file" accept="image/png,image/jpeg,image/webp" required><button class="button">Carica riferimento</button></form>
+  {% if assets_by_kind.get('character_reference') %}<img class="reference-preview" src="/assets/{{ assets_by_kind.get('character_reference')[0].id }}" alt="Frame personaggio">{% endif %}
+</section>
+{% if assets_by_kind.get('render') %}<section class="panel media-panel"><div class="panel-title"><div><p class="eyebrow">VIDEO PRINCIPALE</p><h2>Anteprima 16:9</h2></div><a class="button" href="/assets/{{ assets_by_kind.get('render')[0].id }}">Scarica MP4</a></div><video controls preload="metadata" src="/assets/{{ assets_by_kind.get('render')[0].id }}"></video></section>{% endif %}
+{% if assets_by_kind.get('short') %}<section class="detail-grid"><article class="panel media-panel"><div class="panel-title"><div><p class="eyebrow">SHORT</p><h2>Anteprima 9:16</h2></div><a class="button" href="/assets/{{ assets_by_kind.get('short')[0].id }}">Scarica</a></div><video class="short-video" controls preload="metadata" src="/assets/{{ assets_by_kind.get('short')[0].id }}"></video></article><article class="panel"><div class="panel-title"><div><p class="eyebrow">THUMBNAIL</p><h2>Copertina</h2></div></div>{% if assets_by_kind.get('thumbnail') %}<img class="thumbnail-preview" src="/assets/{{ assets_by_kind.get('thumbnail')[0].id }}" alt="Thumbnail">{% endif %}</article></section>{% endif %}
+<section class="detail-grid">
+  <article class="panel"><div class="panel-title"><div><p class="eyebrow">CANZONE</p><h2>Testo</h2></div></div>{% if episode.lyrics_text %}<pre class="lyrics">{{ episode.lyrics_text }}</pre>{% else %}<p class="muted">Non ancora generato.</p>{% endif %}</article>
+  <article class="panel"><div class="panel-title"><div><p class="eyebrow">REGIA</p><h2>Storyboard</h2></div></div>{% if episode.storyboard_json %}<ol class="storyboard">{% for scene in episode.storyboard_json %}<li><span>{{ scene.start_seconds }}–{{ scene.start_seconds + scene.duration_seconds }}s</span><p><strong>{{ scene.word }}</strong><br>{{ scene.action }}</p></li>{% endfor %}</ol>{% else %}<p class="muted">Non ancora generato.</p>{% endif %}</article>
+</section>
+<section class="panel"><div class="panel-title"><div><p class="eyebrow">GROWTH LAB</p><h2>{{ growth.score }}/100 • confidenza {{ growth.confidence }}</h2></div><a class="button" href="/growth">Apri report</a></div><p>{{ growth.recommendation }}</p></section>
+<section class="panel"><div class="panel-title"><div><p class="eyebrow">PROVENIENZA</p><h2>Registro asset</h2></div></div>{% if episode.assets %}<div class="asset-table">{% for asset in episode.assets %}<div class="asset-row"><span class="asset-kind">{{ asset.kind.value }}</span><span>{{ asset.provider }}</span><span>v{{ asset.variant }}</span><span>{{ asset.width or '—' }}×{{ asset.height or '—' }}</span><span>${{ "%.3f"|format(asset.cost_usd) }}</span><a href="/assets/{{ asset.id }}">Apri</a></div>{% endfor %}</div>{% endif %}</section>
+{% endblock %}

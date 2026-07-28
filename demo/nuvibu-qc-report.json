@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "score": 100,
+  "findings": [],
+  "checks": {
+    "content_terms": true,
+    "prompt_guardrails": true,
+    "age_range": true,
+    "duration": true,
+    "bpm": true,
+    "scene_pacing": true,
+    "music": true,
+    "main_render": true,
+    "short": true,
+    "thumbnail": true
+  }
+}
