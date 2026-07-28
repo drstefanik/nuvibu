@@ -1,22 +1,30 @@
 from __future__ import annotations
 
-import base64
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
+from ipaddress import ip_address
 import secrets
 import shutil
 import tempfile
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
+from .auth import (
+    LoginAttemptLimiter,
+    SESSION_COOKIE_NAME,
+    SESSION_MAX_AGE_SECONDS,
+    create_session_token,
+    safe_next_path,
+    validate_session_token,
+)
 from .config import get_settings
 from .database import get_db, init_db
 from .models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus, MetricSnapshot, PublishRecord
@@ -25,6 +33,7 @@ from .schemas import EpisodeCreate, MetricCreate, PipelineRequest
 from .services.analytics import sync_youtube_metrics
 from .services.growth import calculate_growth_score, latest_metric
 from .services.pipeline import (
+    ActiveJobError,
     PipelineService,
     ReferenceChangeConflictError,
     slugify,
@@ -47,55 +56,156 @@ app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 BASE_DIR = Path(__file__).resolve().parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+PUBLIC_PATHS = {"/health", "/healthz", "/readyz", "/login"}
+LOGIN_LIMITER = LoginAttemptLimiter(max_failures=5, window_seconds=300)
+
+
+def valid_console_session(request: Request) -> bool:
+    if not settings.admin_username or not settings.admin_password:
+        return False
+    return validate_session_token(
+        request.cookies.get(SESSION_COOKIE_NAME),
+        secret_key=settings.secret_key,
+        username=settings.admin_username,
+        password=settings.admin_password,
+    )
+
+
+def login_client_key(request: Request) -> str:
+    """Use the verified client address in Google's appended XFF suffix."""
+
+    if settings.app_env == "production":
+        forwarded = [
+            value.strip()
+            for value in request.headers.get("x-forwarded-for", "").split(",")
+            if value.strip()
+        ]
+        # Google external load balancing appends client IP then forwarding-rule
+        # IP. Anything farther left is supplied by the caller and untrusted.
+        candidate = forwarded[-2] if len(forwarded) >= 2 else None
+        if candidate is not None:
+            try:
+                return f"xff:{ip_address(candidate).compressed}"
+            except ValueError:
+                # Never walk farther left into client-supplied XFF values.
+                pass
+    peer = request.client.host if request.client else "unknown"
+    return f"peer:{peer}"
+
+
+def secure_response(response: Response) -> Response:
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=()",
+    )
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; img-src 'self' data:; media-src 'self'; "
+        "style-src 'self'; base-uri 'none'; form-action 'self'; "
+        "frame-ancestors 'none'",
+    )
+    if settings.app_env == "production":
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    return response
+
+
+def canonical_console_url(request: Request) -> str | None:
+    if settings.app_env != "production" or request.method not in {"GET", "HEAD"}:
+        return None
+    if request.url.path in {"/health", "/healthz", "/readyz"}:
+        return None
+    canonical = urlsplit(settings.app_base_url)
+    if canonical.hostname == "placeholder.invalid":
+        return None
+    if not canonical.netloc or request.url.netloc == canonical.netloc:
+        return None
+    target = f"{settings.app_base_url.rstrip('/')}{request.url.path}"
+    if request.url.query:
+        target = f"{target}?{request.url.query}"
+    return target
 
 
 @app.middleware("http")
 async def console_security(request: Request, call_next):
+    canonical_url = canonical_console_url(request)
+    if canonical_url:
+        return secure_response(RedirectResponse(canonical_url, status_code=308))
+
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
-            return JSONResponse({"detail": "Cross-site request rejected"}, status_code=403)
+            return secure_response(
+                JSONResponse(
+                    {"detail": "Cross-site request rejected"},
+                    status_code=403,
+                )
+            )
         origin = request.headers.get("origin")
         allowed_origins = {
             str(request.base_url).rstrip("/"),
             settings.app_base_url.rstrip("/"),
         }
         if origin and origin.rstrip("/") not in allowed_origins:
-            return JSONResponse({"detail": "Origin rejected"}, status_code=403)
+            return secure_response(
+                JSONResponse({"detail": "Origin rejected"}, status_code=403)
+            )
         referer = request.headers.get("referer")
         if not origin and referer:
             parsed = urlsplit(referer)
             referer_origin = f"{parsed.scheme}://{parsed.netloc}"
             if referer_origin.rstrip("/") not in allowed_origins:
-                return JSONResponse({"detail": "Referer rejected"}, status_code=403)
+                return secure_response(
+                    JSONResponse({"detail": "Referer rejected"}, status_code=403)
+                )
         content_type = request.headers.get("content-type", "").lower()
         is_browser_form = content_type.startswith(
             ("application/x-www-form-urlencoded", "multipart/form-data")
         )
         if is_browser_form and not origin and not referer:
-            return JSONResponse(
-                {"detail": "Same-origin form proof required"},
-                status_code=403,
+            return secure_response(
+                JSONResponse(
+                    {"detail": "Same-origin form proof required"},
+                    status_code=403,
+                )
             )
-    if settings.admin_username and settings.admin_password and request.url.path not in {
-        "/health",
-        "/healthz",
-        "/readyz",
-    }:
-        auth = request.headers.get("Authorization", "")
-        valid = False
-        if auth.startswith("Basic "):
-            try:
-                decoded = base64.b64decode(auth[6:]).decode("utf-8")
-                username, password = decoded.split(":", 1)
-                valid = secrets.compare_digest(username, settings.admin_username) and secrets.compare_digest(password, settings.admin_password)
-            except Exception:
-                valid = False
-        if not valid:
-            return JSONResponse(
-                {"detail": "Authentication required"}, status_code=401,
-                headers={"WWW-Authenticate": 'Basic realm="Nuvibù Studio"'},
+    is_public = (
+        request.url.path in PUBLIC_PATHS
+        or request.url.path.startswith("/static/")
+    )
+    if (
+        settings.admin_username
+        and settings.admin_password
+        and not is_public
+        and not valid_console_session(request)
+    ):
+        if request.method in {"GET", "HEAD"} and "text/html" in request.headers.get(
+            "accept", ""
+        ).lower():
+            next_path = request.url.path
+            if request.url.query:
+                next_path = f"{next_path}?{request.url.query}"
+            return secure_response(
+                RedirectResponse(
+                    f"/login?next={quote(next_path, safe='')}",
+                    status_code=303,
+                )
             )
-    return await call_next(request)
+        else:
+            return secure_response(
+                JSONResponse(
+                    {"detail": "Authentication required"},
+                    status_code=401,
+                )
+            )
+    response = await call_next(request)
+    if not is_public:
+        response.headers.setdefault("Cache-Control", "no-store")
+    return secure_response(response)
 
 
 def get_episode_or_404(db: Session, episode_id: str) -> Episode:
@@ -132,6 +242,121 @@ def readiness(db: Session = Depends(get_db)) -> dict:
     return {"status": "ready", "database": "ok", "storage": "ok"}
 
 
+@app.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, next: str = "/"):
+    destination = safe_next_path(next)
+    if valid_console_session(request):
+        return RedirectResponse(destination, status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "error": None,
+            "next_path": destination,
+            "settings": settings,
+        },
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    next: str = Form("/"),
+):
+    destination = safe_next_path(next)
+    client_key = login_client_key(request)
+    if not LOGIN_LIMITER.check(client_key):
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "error": (
+                    "Troppi tentativi non riusciti. "
+                    "Attendi cinque minuti prima di riprovare."
+                ),
+                "next_path": destination,
+                "settings": settings,
+            },
+            status_code=429,
+            headers={
+                "Cache-Control": "no-store",
+                "Retry-After": "300",
+            },
+        )
+    valid = bool(
+        settings.admin_username
+        and settings.admin_password
+        and secrets.compare_digest(username, settings.admin_username)
+        and secrets.compare_digest(password, settings.admin_password)
+    )
+    if valid:
+        LOGIN_LIMITER.reset(client_key)
+        response = RedirectResponse(destination, status_code=303)
+        response.set_cookie(
+            SESSION_COOKIE_NAME,
+            create_session_token(
+                secret_key=settings.secret_key,
+                username=settings.admin_username,
+                password=settings.admin_password,
+            ),
+            max_age=SESSION_MAX_AGE_SECONDS,
+            httponly=True,
+            secure=settings.app_env == "production",
+            samesite="lax",
+            path="/",
+        )
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    another_attempt_allowed = LOGIN_LIMITER.record_failure(client_key)
+    if not another_attempt_allowed:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "error": (
+                    "Troppi tentativi non riusciti. "
+                    "Attendi cinque minuti prima di riprovare."
+                ),
+                "next_path": destination,
+                "settings": settings,
+            },
+            status_code=429,
+            headers={
+                "Cache-Control": "no-store",
+                "Retry-After": "300",
+            },
+        )
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "error": "Credenziali non valide. Riprova.",
+            "next_path": destination,
+            "settings": settings,
+        },
+        status_code=401,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/logout")
+def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(
+        SESSION_COOKIE_NAME,
+        path="/",
+        secure=settings.app_env == "production",
+        httponly=True,
+        samesite="lax",
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def worker_dispatch_due(
     job: Job,
     *,
@@ -160,25 +385,194 @@ def worker_dispatch_due(
     ).total_seconds() >= retry_after
 
 
-def enqueue_and_dispatch(db: Session, episode: Episode, through_step: str) -> Job:
-    service = PipelineService(db, settings)
-    if settings.app_env == "production":
-        if through_step in {"scenes", "render", "qc"} and service.character_reference(episode) is None:
+def validate_production_stage(
+    service: PipelineService,
+    episode: Episode,
+    through_step: str,
+    *,
+    confirm_cost: bool,
+) -> float:
+    active_job = service.active_job(episode)
+    if active_job is not None:
+        active_step = str(
+            active_job.payload_json.get("through_step", "qc")
+        )
+        if active_step != through_step:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Worker job {active_job.id} is already "
+                    f"{active_job.status.value} for phase {active_step}"
+                ),
+            )
+        retryable = (
+            active_job.status == JobStatus.PENDING
+            and worker_dispatch_due(active_job)
+        ) or service.job_is_stale(active_job)
+        if not retryable:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Worker job {active_job.id} is already "
+                    f"{active_job.status.value} for phase {active_step}; "
+                    "it is not ready to be retried"
+                ),
+            )
+        if through_step in {"music", "scenes", "render", "qc"} and not confirm_cost:
             raise HTTPException(
                 status_code=400,
-                detail="Upload the approved Nuvibù character reference before video generation",
+                detail="Explicit cost confirmation is required to resume paid work",
             )
-        if through_step in {"music", "storyboard", "scenes", "render", "qc"}:
-            try:
-                service.assert_budget(episode)
-            except RuntimeError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            db.commit()
-    job = service.enqueue(episode, through_step)
+        return service.estimate_job_incremental_cost(
+            episode,
+            through_step,
+        )
+
+    has_lyrics = bool(
+        episode.lyrics_text
+        and service.has_valid_asset(episode, AssetKind.LYRICS)
+    )
+    has_storyboard = bool(
+        episode.storyboard_json
+        and service.has_valid_asset(episode, AssetKind.STORYBOARD)
+    )
+    has_music = service.has_valid_asset(episode, AssetKind.MUSIC)
+    has_reference = service.has_valid_asset(
+        episode,
+        AssetKind.CHARACTER_REFERENCE,
+    )
+    has_qc = service.has_valid_asset(episode, AssetKind.REPORT)
+
+    if through_step == "lyrics":
+        if has_lyrics:
+            raise HTTPException(
+                status_code=409,
+                detail="Lyrics already exist; review, edit and approve them",
+            )
+        return 0.0
+
+    if through_step == "storyboard":
+        if not has_lyrics or not service.content_is_approved(
+            episode,
+            "lyrics",
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Approve the current lyrics before creating the storyboard",
+            )
+        if has_storyboard:
+            raise HTTPException(
+                status_code=409,
+                detail="Storyboard already exists; review and approve it",
+            )
+        return 0.0
+
+    if through_step == "music":
+        if not has_storyboard or not service.content_is_approved(
+            episode,
+            "storyboard",
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Approve the current storyboard before generating music",
+            )
+        if has_music:
+            raise HTTPException(
+                status_code=409,
+                detail="Music already exists",
+            )
+        if not confirm_cost:
+            raise HTTPException(
+                status_code=400,
+                detail="Explicit music cost confirmation is required",
+            )
+        incremental_cost = service.estimate_music_cost(episode)
+    elif through_step == "qc":
+        if not has_storyboard or not service.content_is_approved(
+            episode,
+            "storyboard",
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Approve the current storyboard before rendering",
+            )
+        if not has_music:
+            raise HTTPException(
+                status_code=409,
+                detail="Generate and review the music before rendering",
+            )
+        if not has_reference:
+            raise HTTPException(
+                status_code=409,
+                detail="Upload the approved Nuvibù character reference before rendering",
+            )
+        if has_qc:
+            raise HTTPException(
+                status_code=409,
+                detail="QC already exists for this episode",
+            )
+        if not confirm_cost:
+            raise HTTPException(
+                status_code=400,
+                detail="Explicit render cost confirmation is required",
+            )
+        incremental_cost = service.estimate_remaining_cost(episode)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Production accepts only the controlled phases: "
+                "lyrics, storyboard, music and qc"
+            ),
+        )
+
+    try:
+        service.assert_budget(episode)
+        service.assert_daily_budget(incremental_cost)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return incremental_cost
+
+
+def enqueue_and_dispatch(
+    db: Session,
+    episode: Episode,
+    through_step: str,
+    *,
+    confirm_cost: bool = False,
+) -> Job:
+    service = PipelineService(db, settings)
+    estimated_incremental_cost: float | None = None
+    if settings.app_env == "production":
+        estimated_incremental_cost = validate_production_stage(
+            service,
+            episode,
+            through_step,
+            confirm_cost=confirm_cost,
+        )
+        db.commit()
+    try:
+        job = service.enqueue(
+            episode,
+            through_step,
+            estimated_incremental_cost=estimated_incremental_cost,
+        )
+    except ActiveJobError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if (
         settings.app_env == "production"
         and worker_dispatch_due(job)
     ):
+        dispatched_at = datetime.now(timezone.utc).isoformat()
+        job.result_json = {
+            **job.result_json,
+            # Persist before the external call. If its outcome is ambiguous,
+            # a retry waits before starting another Cloud Run execution.
+            "cloud_run_dispatched_at": dispatched_at,
+        }
+        db.commit()
         try:
             operation_name = dispatch_worker_job(settings, job.id)
         except Exception as exc:
@@ -197,7 +591,7 @@ def enqueue_and_dispatch(db: Session, episode: Episode, through_step: str) -> Jo
             **job.result_json,
             "cloud_run_operation": operation_name,
             "cloud_run_operation_history": prior_operations,
-            "cloud_run_dispatched_at": datetime.now(timezone.utc).isoformat(),
+            "cloud_run_dispatched_at": dispatched_at,
         }
         job.error_text = None
         db.commit()
@@ -278,7 +672,19 @@ def create_episode_api(payload: EpisodeCreate, db: Session = Depends(get_db)):
 @app.get("/episodes/{episode_id}", response_class=HTMLResponse)
 def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_db)):
     episode = get_episode_or_404(db, episode_id)
-    estimated_cost = PipelineService(db, settings).estimate_cost(episode)
+    service = PipelineService(db, settings)
+    estimated_cost = service.estimate_cost(episode)
+    active_job = service.active_job(episode)
+    active_job_retryable = bool(
+        active_job
+        and (
+            (
+                active_job.status == JobStatus.PENDING
+                and worker_dispatch_due(active_job)
+            )
+            or service.job_is_stale(active_job)
+        )
+    )
     jobs = db.scalars(
         select(Job)
         .where(Job.episode_id == episode.id)
@@ -292,6 +698,35 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
             "assets_by_kind": grouped_assets(episode),
             "jobs": jobs,
             "estimated_cost": estimated_cost,
+            "music_estimated_cost": service.estimate_music_cost(episode),
+            "remaining_estimated_cost": service.estimate_remaining_cost(episode),
+            "active_job": active_job,
+            "active_job_retryable": active_job_retryable,
+            "has_lyrics": bool(
+                episode.lyrics_text
+                and service.has_valid_asset(episode, AssetKind.LYRICS)
+            ),
+            "lyrics_approved": service.content_is_approved(
+                episode,
+                "lyrics",
+            ),
+            "has_storyboard": bool(
+                episode.storyboard_json
+                and service.has_valid_asset(episode, AssetKind.STORYBOARD)
+            ),
+            "storyboard_approved": service.content_is_approved(
+                episode,
+                "storyboard",
+            ),
+            "has_music": service.has_valid_asset(episode, AssetKind.MUSIC),
+            "has_reference": service.has_valid_asset(
+                episode,
+                AssetKind.CHARACTER_REFERENCE,
+            ),
+            "has_qc": service.has_valid_asset(
+                episode,
+                AssetKind.REPORT,
+            ),
             "settings": settings,
             "growth": calculate_growth_score(latest_metric(episode)),
         },
@@ -299,11 +734,25 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
 
 
 @app.post("/episodes/{episode_id}/run")
-def run_pipeline_form(episode_id: str, through_step: str = Form("qc"), queued: bool = Form(False), db: Session = Depends(get_db)):
-    payload = PipelineRequest(through_step=through_step)
+def run_pipeline_form(
+    episode_id: str,
+    through_step: str = Form("qc"),
+    queued: bool = Form(False),
+    confirm_cost: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    payload = PipelineRequest(
+        through_step=through_step,
+        confirm_cost=confirm_cost,
+    )
     episode = get_episode_or_404(db, episode_id)
     if queued or settings.app_env == "production":
-        enqueue_and_dispatch(db, episode, payload.through_step)
+        enqueue_and_dispatch(
+            db,
+            episode,
+            payload.through_step,
+            confirm_cost=payload.confirm_cost,
+        )
     else:
         try:
             PipelineService(db, settings).run_through(episode, payload.through_step)
@@ -318,7 +767,12 @@ def run_pipeline_form(episode_id: str, through_step: str = Form("qc"), queued: b
 def run_pipeline_api(episode_id: str, payload: PipelineRequest, db: Session = Depends(get_db)):
     episode = get_episode_or_404(db, episode_id)
     if settings.app_env == "production":
-        job = enqueue_and_dispatch(db, episode, payload.through_step)
+        job = enqueue_and_dispatch(
+            db,
+            episode,
+            payload.through_step,
+            confirm_cost=payload.confirm_cost,
+        )
         return JSONResponse(
             {
                 "id": episode.id,
@@ -330,6 +784,79 @@ def run_pipeline_api(episode_id: str, payload: PipelineRequest, db: Session = De
         )
     PipelineService(db, settings).run_through(episode, payload.through_step)
     return {"id": episode.id, "status": episode.status.value, "qc": episode.qc_json}
+
+
+@app.post("/episodes/{episode_id}/lyrics")
+def update_lyrics(
+    episode_id: str,
+    lyrics_text: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    cleaned = lyrics_text.strip()
+    if not 20 <= len(cleaned) <= 4000:
+        raise HTTPException(
+            status_code=400,
+            detail="Lyrics must contain between 20 and 4000 characters",
+        )
+    try:
+        PipelineService(db, settings).update_lyrics_draft(episode, cleaned)
+    except (ActiveJobError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}#lyrics-review",
+        status_code=303,
+    )
+
+
+@app.post("/episodes/{episode_id}/lyrics/approve")
+def approve_lyrics(
+    episode_id: str,
+    lyrics_text: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    cleaned = lyrics_text.strip()
+    if not 20 <= len(cleaned) <= 4000:
+        raise HTTPException(
+            status_code=400,
+            detail="Lyrics must contain between 20 and 4000 characters",
+        )
+    try:
+        service = PipelineService(db, settings)
+        service.update_lyrics_draft(episode, cleaned)
+        service.approve_content(episode, "lyrics")
+    except (ActiveJobError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}#storyboard-review",
+        status_code=303,
+    )
+
+
+@app.post("/episodes/{episode_id}/storyboard/approve")
+def approve_storyboard(
+    episode_id: str,
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    try:
+        PipelineService(db, settings).approve_content(
+            episode,
+            "storyboard",
+        )
+    except (ActiveJobError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}",
+        status_code=303,
+    )
 
 
 @app.get("/api/jobs/{job_id}")
@@ -370,6 +897,15 @@ def upload_character_reference(episode_id: str, file: UploadFile = File(...), db
 @app.post("/episodes/{episode_id}/approve")
 def approve_episode(episode_id: str, db: Session = Depends(get_db)):
     episode = get_episode_or_404(db, episode_id)
+    service = PipelineService(db, settings)
+    if settings.app_env == "production" and (
+        not service.content_is_approved(episode, "lyrics")
+        or not service.content_is_approved(episode, "storyboard")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Lyrics and storyboard approvals are required",
+        )
     if not episode.qc_json.get("passed"):
         raise HTTPException(status_code=400, detail="Automatic QC must pass before approval")
     episode.status = EpisodeStatus.APPROVED

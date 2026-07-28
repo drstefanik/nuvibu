@@ -26,7 +26,12 @@ Le preview mock usano concept di qualità ma non contengono vera animazione dei 
 
 ## 3. Per produrre un episodio reale
 
-Compilare `.env` con provider musicali e video, avviare il worker, caricare la reference 16:9 approvata e generare prima un test di 20–30 secondi. Solo dopo l'approvazione di voce, movimento e consistenza si estende il render all'episodio intero.
+Compilare `.env` con provider musicali e video e avviare il worker. Creare un
+test di 20–30 secondi con una sola parola target: prima revisionare e approvare
+testo e storyboard gratuiti, poi confermare separatamente i costi di musica e
+render. Caricare la reference 16:9 definitiva prima delle scene. Solo dopo
+l'approvazione di voce, movimento e consistenza si estende il render
+all'episodio intero.
 
 ## 4. YouTube
 

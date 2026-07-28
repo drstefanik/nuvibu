@@ -27,6 +27,7 @@ class EpisodeCreate(BaseModel):
 
 class PipelineRequest(BaseModel):
     through_step: str = Field(default="qc", pattern=r"^(lyrics|music|storyboard|scenes|render|qc)$")
+    confirm_cost: bool = False
 
 
 class MetricCreate(BaseModel):

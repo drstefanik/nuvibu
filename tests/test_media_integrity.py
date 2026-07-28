@@ -156,7 +156,7 @@ def test_reference_change_is_blocked_while_pipeline_job_is_active(tmp_path: Path
         assert old_reference.exists()
 
 
-def test_reference_change_invalidates_only_dependent_outputs(tmp_path: Path):
+def test_reference_change_preserves_dependent_outputs_and_spend(tmp_path: Path):
     Session = make_session(tmp_path)
     settings = make_settings(tmp_path)
     with Session() as db:
@@ -233,37 +233,34 @@ def test_reference_change_invalidates_only_dependent_outputs(tmp_path: Path):
         replacement = tmp_path / "replacement.png"
         write_png(replacement, "red")
 
-        new_asset = PipelineService(db, settings).save_character_reference(
-            episode, replacement
-        )
-        remaining = set(
-            db.scalars(
-                select(Asset.kind).where(Asset.episode_id == episode.id)
-            ).all()
-        )
-
-        assert remaining == {
-            AssetKind.LYRICS,
-            AssetKind.MUSIC,
-            AssetKind.STORYBOARD,
-            AssetKind.CHARACTER_REFERENCE,
+        before = {
+            asset.id: (asset.kind, asset.cost_usd, asset.path)
+            for asset in db.scalars(
+                select(Asset).where(Asset.episode_id == episode.id)
+            )
         }
-        assert Path(new_asset.path).exists()
-        assert not files[AssetKind.CHARACTER_REFERENCE].exists()
-        for kind in (
-            AssetKind.VIDEO_SCENE,
-            AssetKind.RENDER,
-            AssetKind.SHORT,
-            AssetKind.THUMBNAIL,
-            AssetKind.REPORT,
+
+        with pytest.raises(
+            ReferenceChangeConflictError, match="operation.*receipt"
         ):
-            assert not files[kind].exists()
-        assert not scene_sidecar.exists()
-        assert list(scene_sidecar.parent.glob(f"{scene_sidecar.name}.superseded.*"))
-        assert files[AssetKind.MUSIC].exists()
-        assert episode.qc_json == {}
-        assert episode.status == EpisodeStatus.STORYBOARD_READY
-        assert episode.actual_cost_usd == pytest.approx(0.5)
+            PipelineService(db, settings).save_character_reference(
+                episode, replacement
+            )
+
+        after = {
+            asset.id: (asset.kind, asset.cost_usd, asset.path)
+            for asset in db.scalars(
+                select(Asset).where(Asset.episode_id == episode.id)
+            )
+        }
+        assert after == before
+        assert all(path.exists() for path in files.values())
+        assert scene_sidecar.exists()
+        assert not list(
+            scene_sidecar.parent.glob(f"{scene_sidecar.name}.superseded.*")
+        )
+        assert episode.qc_json == {"passed": True, "score": 100}
+        assert sum(value[1] for value in after.values()) == pytest.approx(1.5)
 
 
 @pytest.mark.parametrize(

@@ -7,18 +7,24 @@ from pathlib import Path
 import httpx
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
 from app.main import worker_dispatch_due
-from app.models import EpisodeStatus, Job, JobStatus
+from app.models import Asset, AssetKind, EpisodeStatus, Job, JobStatus
 from app.providers.base import VideoResult
-from app.providers.elevenlabs import ElevenLabsMusicProvider, music_receipt_path
-from app.services.pipeline import PipelineService
+from app.providers.elevenlabs import (
+    ElevenLabsMusicProvider,
+    music_receipt_path,
+    music_request_fingerprint,
+)
+from app.services.pipeline import ActiveJobError, PipelineService
+from app.services.prompts import music_prompt
 from app.services.render import concatenate_scenes
 from app.services.worker_dispatch import dispatch_worker_job
+from scripts.run_worker import job_claim_query
 from tests.test_pipeline import make_episode
 
 
@@ -188,6 +194,194 @@ def test_stale_running_job_is_failed_and_replaced(tmp_path: Path):
         assert stale.status == JobStatus.FAILED
         assert replacement.id != stale.id
         assert replacement.status == JobStatus.PENDING
+        assert (
+            stale.result_json["budget_reservation_release_reason"]
+            == "stale"
+        )
+
+
+def test_stale_job_with_unresolved_provider_state_keeps_same_reservation(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        provider_mode="live",
+        job_stale_after_seconds=900,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode()
+        db.add(episode)
+        db.commit()
+        stale = Job(
+            episode_id=episode.id,
+            job_type="pipeline",
+            status=JobStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            payload_json={
+                "through_step": "music",
+                "budget_reserved_usd": 1.0,
+                "budget_actual_baseline_usd": 0.0,
+                "budget_reserved_at": (
+                    datetime.now(timezone.utc) - timedelta(hours=1)
+                ).isoformat(),
+            },
+        )
+        db.add(stale)
+        db.commit()
+        output = settings.asset_dir / episode.id / "music-v1.mp3"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        music_receipt_path(output).write_text(
+            '{"state":"submitting","request_fingerprint":"ambiguous"}',
+            encoding="utf-8",
+        )
+
+        recovered = PipelineService(db, settings).enqueue(
+            episode,
+            "music",
+            estimated_incremental_cost=1.0,
+        )
+
+        assert recovered.id == stale.id
+        assert recovered.status == JobStatus.PENDING
+        assert recovered.payload_json["budget_reserved_usd"] == 1.0
+        assert recovered.result_json["provider_reconciliation_required"]
+        assert "budget_reservation_release_reason" not in recovered.result_json
+
+
+def test_stale_job_recovery_cannot_upgrade_the_authorized_step(tmp_path: Path):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        job_stale_after_seconds=900,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode()
+        db.add(episode)
+        db.commit()
+        stale = Job(
+            episode_id=episode.id,
+            job_type="pipeline",
+            status=JobStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            payload_json={"through_step": "music"},
+        )
+        db.add(stale)
+        db.commit()
+        service = PipelineService(db, settings)
+
+        with pytest.raises(ActiveJobError, match="cannot upgrade"):
+            service.enqueue(episode, "qc")
+
+        db.refresh(stale)
+        assert stale.status == JobStatus.FAILED
+        replacement = service.enqueue(episode, "music")
+        assert replacement.payload_json["through_step"] == "music"
+
+
+def test_stale_music_job_with_durable_output_can_advance_to_qc(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        job_stale_after_seconds=900,
+        max_music_variants=1,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode()
+        db.add(episode)
+        db.commit()
+        music = settings.asset_dir / episode.id / "music-v1.mp3"
+        music.parent.mkdir(parents=True, exist_ok=True)
+        music.write_bytes(b"durably ledgered music")
+        db.add(
+            Asset(
+                episode=episode,
+                kind=AssetKind.MUSIC,
+                provider="test",
+                path=str(music),
+                mime_type="audio/mpeg",
+                variant=1,
+                selected=True,
+                cost_usd=0.04,
+            )
+        )
+        stale = Job(
+            episode_id=episode.id,
+            job_type="pipeline",
+            status=JobStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            payload_json={"through_step": "music"},
+        )
+        db.add(stale)
+        db.commit()
+
+        next_job = PipelineService(db, settings).enqueue(episode, "qc")
+
+        db.refresh(stale)
+        assert stale.status == JobStatus.FAILED
+        assert next_job.id != stale.id
+        assert next_job.payload_json["through_step"] == "qc"
+
+
+def test_stale_lyrics_job_with_durable_output_can_advance_to_storyboard(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        job_stale_after_seconds=900,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode()
+        db.add(episode)
+        db.commit()
+        lyrics = settings.asset_dir / episode.id / "lyrics.txt"
+        lyrics.parent.mkdir(parents=True, exist_ok=True)
+        lyrics.write_text("Nuvibù saluta piano", encoding="utf-8")
+        episode.lyrics_text = lyrics.read_text(encoding="utf-8")
+        db.add(
+            Asset(
+                episode=episode,
+                kind=AssetKind.LYRICS,
+                provider="test",
+                path=str(lyrics),
+                mime_type="text/plain",
+                selected=True,
+            )
+        )
+        stale = Job(
+            episode_id=episode.id,
+            job_type="pipeline",
+            status=JobStatus.RUNNING,
+            started_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            payload_json={"through_step": "lyrics"},
+        )
+        db.add(stale)
+        db.commit()
+
+        next_job = PipelineService(db, settings).enqueue(
+            episode,
+            "storyboard",
+        )
+
+        db.refresh(stale)
+        assert stale.status == JobStatus.FAILED
+        assert next_job.id != stale.id
+        assert next_job.payload_json["through_step"] == "storyboard"
 
 
 def test_failed_pipeline_marks_job_and_exits_nonzero_path(
@@ -213,7 +407,22 @@ def test_failed_pipeline_marks_job_and_exits_nonzero_path(
         db.commit()
         service = PipelineService(db, settings)
 
-        def fail(*_args, **_kwargs):
+        def fail(failed_episode, *_args, **_kwargs):
+            paid_output = tmp_path / "paid-before-failure.mp3"
+            paid_output.write_bytes(b"paid")
+            db.add(
+                Asset(
+                    episode=failed_episode,
+                    kind=AssetKind.MUSIC,
+                    provider="test",
+                    path=str(paid_output),
+                    mime_type="audio/mpeg",
+                    cost_usd=0.75,
+                )
+            )
+            # Paid stages ledger each completed provider result before later
+            # pipeline work can fail.
+            db.commit()
             raise RuntimeError("provider failed")
 
         monkeypatch.setattr(service, "run_through", fail)
@@ -225,6 +434,159 @@ def test_failed_pipeline_marks_job_and_exits_nonzero_path(
         assert job.status == JobStatus.FAILED
         assert job.error_text == "provider failed"
         assert episode.status == EpisodeStatus.FAILED
+        assert episode.actual_cost_usd == pytest.approx(0.75)
+        assert (
+            job.result_json["budget_reservation_release_reason"]
+            == "failed"
+        )
+
+
+@pytest.mark.parametrize(
+    "artifact_kind",
+    ["music_submitting", "veo_running", "veo_invalid"],
+)
+def test_ambiguous_provider_state_keeps_job_pending_and_reserved(
+    tmp_path: Path,
+    monkeypatch,
+    artifact_kind: str,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        provider_mode="live",
+        max_scene_retries=0,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode()
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        through_step = "music" if artifact_kind.startswith("music") else "qc"
+        job = service.enqueue(
+            episode,
+            through_step,
+            estimated_incremental_cost=1.0,
+        )
+
+        def fail_with_marker(*_args, **_kwargs):
+            if artifact_kind.startswith("music"):
+                output = (
+                    settings.asset_dir / episode.id / "music-v1.mp3"
+                )
+                output.parent.mkdir(parents=True, exist_ok=True)
+                music_receipt_path(output).write_text(
+                    '{"state":"submitting","request_fingerprint":"ambiguous"}',
+                    encoding="utf-8",
+                )
+            else:
+                sidecar = (
+                    settings.asset_dir
+                    / episode.id
+                    / "scenes"
+                    / "scene-000.mp4.operation.json"
+                )
+                sidecar.parent.mkdir(parents=True, exist_ok=True)
+                sidecar.write_text(
+                    (
+                        '{"state":"running","operation_name":"operations/paid"}'
+                        if artifact_kind == "veo_running"
+                        else "{not-json"
+                    ),
+                    encoding="utf-8",
+                )
+            raise RuntimeError("ambiguous provider failure")
+
+        monkeypatch.setattr(service, "run_through", fail_with_marker)
+        with pytest.raises(RuntimeError, match="ambiguous provider failure"):
+            service.process_job(job)
+
+        db.refresh(job)
+        db.refresh(episode)
+        assert job.status == JobStatus.PENDING
+        assert job.started_at is None
+        assert job.finished_at is None
+        assert job.error_text == "ambiguous provider failure"
+        assert job.result_json["provider_reconciliation_required"]
+        assert "budget_reservation_release_reason" not in job.result_json
+        assert job.payload_json["budget_reserved_usd"] >= 1.0
+        assert episode.status != EpisodeStatus.FAILED
+
+
+def test_completed_music_before_ledger_resumes_the_same_reserved_job(
+    tmp_path: Path,
+    monkeypatch,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        provider_mode="live",
+        max_music_variants=1,
+        max_scene_retries=0,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode(24)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.generate_lyrics(episode)
+        service.generate_storyboard(episode)
+        service.approve_content(episode, "lyrics")
+        service.approve_content(episode, "storyboard")
+        job = service.enqueue(episode, "music")
+        original_job_id = job.id
+
+        def crash_after_provider(*_args, **_kwargs):
+            output = settings.asset_dir / episode.id / "music-v1.mp3"
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"x" * 2048)
+            fingerprint = music_request_fingerprint(
+                lyrics=episode.lyrics_text or "",
+                prompt=music_prompt(episode),
+                duration_seconds=episode.duration_seconds,
+                bpm=episode.bpm,
+                variant=1,
+                model_id=settings.elevenlabs_music_model,
+                output_format=settings.elevenlabs_output_format,
+            )
+            music_receipt_path(output).write_text(
+                json.dumps(
+                    {
+                        "state": "complete",
+                        "request_fingerprint": fingerprint,
+                        "estimated_cost_usd": 0.06,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            raise RuntimeError("crash before Asset ledger")
+
+        monkeypatch.setattr(service, "run_through", crash_after_provider)
+        with pytest.raises(RuntimeError, match="crash before Asset ledger"):
+            service.process_job(job)
+        db.refresh(job)
+        assert job.status == JobStatus.PENDING
+
+        resumed = PipelineService(db, settings).process_job(job)
+
+        assert resumed.id == original_job_id
+        assert resumed.status == JobStatus.SUCCEEDED
+        assert resumed.result_json["budget_reservation_release_reason"] == (
+            "succeeded"
+        )
+        music_assets = db.scalars(
+            select(Asset).where(
+                Asset.episode_id == episode.id,
+                Asset.kind == AssetKind.MUSIC,
+            )
+        ).all()
+        assert len(music_assets) == 1
+        assert music_assets[0].cost_usd == pytest.approx(0.06)
 
 
 def test_cloud_run_dispatch_targets_the_exact_database_job(monkeypatch):
@@ -264,6 +626,27 @@ def test_cloud_run_dispatch_targets_the_exact_database_job(monkeypatch):
     assert overrides["containerOverrides"][0]["env"] == [
         {"name": "NUVIBU_JOB_ID", "value": "job-123"}
     ]
+
+
+def test_exact_worker_claim_waits_instead_of_skipping_locked_job():
+    from sqlalchemy.dialects import postgresql
+
+    exact_sql = str(
+        job_claim_query("job-123").compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    generic_sql = str(
+        job_claim_query(None).compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "FOR UPDATE" in exact_sql
+    assert "SKIP LOCKED" not in exact_sql
+    assert "FOR UPDATE SKIP LOCKED" in generic_sql
 
 
 def test_pending_job_can_be_redispatched_after_startup_failure_timeout():

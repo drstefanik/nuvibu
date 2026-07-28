@@ -2,54 +2,423 @@
 {% block title %}{{ episode.title }}{% endblock %}
 {% block content %}
 <a class="backlink" href="/">← Tutti gli episodi</a>
+
 <section class="detail-heading">
-  <div><p class="eyebrow">{{ episode.theme|upper }}</p><h1>{{ episode.title }}</h1><p>{{ episode.hook }}</p></div>
-  <div class="status-panel"><span class="status status-{{ episode.status.value }}">{{ episode.status.value.replace('_',' ') }}</span><strong>${{ "%.2f"|format(episode.actual_cost_usd) }}</strong><small>registrato • stima ${{ "%.2f"|format(estimated_cost) }}</small></div>
+  <div>
+    <p class="eyebrow">{{ episode.theme|upper }}</p>
+    <h1>{{ episode.title }}</h1>
+    <p>{{ episode.hook }}</p>
+  </div>
+  <div class="status-panel">
+    <span class="status status-{{ episode.status.value }}">{{ episode.status.value.replace('_',' ') }}</span>
+    <strong>${{ "%.2f"|format(episode.actual_cost_usd) }}</strong>
+    <small>costo registrato • stima completa ${{ "%.2f"|format(estimated_cost) }}</small>
+  </div>
 </section>
-<section class="action-bar">
-  {% if settings.app_env != 'production' %}<form action="/episodes/{{ episode.id }}/run" method="post"><select name="through_step"><option value="lyrics">Solo testo</option><option value="music">Fino alla musica</option><option value="storyboard">Fino allo storyboard</option><option value="scenes">Fino alle scene</option><option value="render">Render completo</option><option value="qc" selected>Render + QC</option></select><button class="button button-primary">Esegui ora</button></form>{% endif %}
-  <form action="/episodes/{{ episode.id }}/run" method="post"><input type="hidden" name="through_step" value="qc"><input type="hidden" name="queued" value="true"><button class="button">Accoda al worker</button></form>
-  {% if episode.qc_json.get('passed') and episode.status.value != 'approved' %}<form action="/episodes/{{ episode.id }}/approve" method="post"><button class="button button-success">Approva finale</button></form>{% endif %}
-  {% if settings.youtube_enabled and episode.status.value == 'approved' %}<form action="/episodes/{{ episode.id }}/youtube" method="post"><button class="button button-success">Carica privato su YouTube</button></form>{% endif %}
-  {% if settings.youtube_enabled and episode.publish_records %}<form action="/episodes/{{ episode.id }}/analytics/sync" method="post"><button class="button">Sincronizza Analytics</button></form>{% endif %}
+
+<section class="stage-card" aria-labelledby="next-stage-title">
+  {% if active_job %}
+  {% set active_step = active_job.payload_json.get('through_step', active_job.job_type) %}
+  <div class="stage-copy">
+    <p class="eyebrow">PRODUZIONE BLOCCATA</p>
+    <h2 id="next-stage-title">Una fase è già in lavorazione</h2>
+    <p>
+      Fase richiesta:
+      <strong>{{ active_step.replace('_', ' ') }}</strong>.
+      Attendi la conclusione prima di avviare o approvare altro.
+    </p>
+    {% if active_job.error_text %}
+    <p class="inline-error" role="alert">{{ active_job.error_text }}</p>
+    {% if not active_job_retryable %}
+    <p class="muted">Per evitare un doppio avvio, attendi qualche minuto e poi aggiorna lo stato.</p>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% if active_job_retryable %}
+  <form class="stage-actions paid-stage" action="/episodes/{{ episode.id }}/run" method="post">
+    <input type="hidden" name="through_step" value="{{ active_step }}">
+    <input type="hidden" name="queued" value="true">
+    {% if active_step in ['music', 'scenes', 'render', 'qc'] %}
+    <label class="confirm-check">
+      <input type="checkbox" name="confirm_cost" value="true" required>
+      <span>Confermo la ripresa della fase e dell’eventuale costo residuo</span>
+    </label>
+    {% endif %}
+    <button class="button button-primary" type="submit">
+      {{ 'Riprova avvio worker' if active_job.status.value == 'pending' else 'Riprendi in sicurezza' }}
+    </button>
+  </form>
+  {% else %}
+  <div class="stage-actions" role="status" aria-live="polite">
+    <span class="status status-{{ active_job.status.value }}">{{ active_job.status.value }}</span>
+    <a class="button" href="/episodes/{{ episode.id }}">Aggiorna stato</a>
+  </div>
+  {% endif %}
+
+  {% elif not has_lyrics %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 1 • GRATUITA</p>
+    <h2 id="next-stage-title">Genera il testo</h2>
+    <p>La prima bozza non usa provider a pagamento. Potrai modificarla e dovrai approvarla prima di proseguire.</p>
+  </div>
+  <form class="stage-actions" action="/episodes/{{ episode.id }}/run" method="post">
+    <input type="hidden" name="through_step" value="lyrics">
+    <input type="hidden" name="queued" value="true">
+    <button class="button button-primary" type="submit">Genera testo • $0</button>
+  </form>
+
+  {% elif not lyrics_approved %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 1 • REVISIONE</p>
+    <h2 id="next-stage-title">Rivedi e approva il testo</h2>
+    <p>Controlla ogni parola. Salva eventuali correzioni prima di dare l’approvazione editoriale.</p>
+  </div>
+  <div class="stage-actions">
+    <a class="button button-primary" href="#lyrics-review">Vai al testo</a>
+  </div>
+
+  {% elif not has_storyboard %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 2 • GRATUITA</p>
+    <h2 id="next-stage-title">Crea lo storyboard</h2>
+    <p>Trasforma il testo approvato in scene da revisionare. Questa fase non genera musica o video e non usa crediti.</p>
+  </div>
+  <form class="stage-actions" action="/episodes/{{ episode.id }}/run" method="post">
+    <input type="hidden" name="through_step" value="storyboard">
+    <input type="hidden" name="queued" value="true">
+    <button class="button button-primary" type="submit">Crea storyboard • $0</button>
+  </form>
+
+  {% elif not storyboard_approved %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 2 • REVISIONE</p>
+    <h2 id="next-stage-title">Rivedi e approva le scene</h2>
+    <p>Controlla azioni, ritmo e continuità. Nessun provider a pagamento partirà prima della tua approvazione.</p>
+  </div>
+  <div class="stage-actions">
+    <a class="button button-primary" href="#storyboard-review">Vai allo storyboard</a>
+  </div>
+
+  {% elif not has_music %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 3 • COSTO REALE</p>
+    <h2 id="next-stage-title">Genera la musica</h2>
+    <p>Testo e storyboard sono approvati. ElevenLabs creerà una sola variante musicale.</p>
+  </div>
+  <form class="stage-actions paid-stage" action="/episodes/{{ episode.id }}/run" method="post">
+    <input type="hidden" name="through_step" value="music">
+    <input type="hidden" name="queued" value="true">
+    <label class="confirm-check">
+      <input type="checkbox" name="confirm_cost" value="true" required>
+      <span>Confermo il costo stimato di <strong>${{ "%.2f"|format(music_estimated_cost) }}</strong></span>
+    </label>
+    <button class="button button-primary" type="submit">Genera musica</button>
+  </form>
+
+  {% elif not has_reference %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 4 • CONTROLLO VISIVO</p>
+    <h2 id="next-stage-title">Carica la reference approvata</h2>
+    <p>Il video resta bloccato finché non viene caricata l’immagine definitiva del personaggio.</p>
+  </div>
+  <div class="stage-actions">
+    <a class="button button-primary" href="#character-reference">Carica reference</a>
+  </div>
+
+  {% elif has_qc and not episode.qc_json.get('passed') %}
+  <div class="stage-copy">
+    <p class="eyebrow">PRODUZIONE ARRESTATA</p>
+    <h2 id="next-stage-title">Il QC richiede revisione manuale</h2>
+    <p>Il report esistente non è stato superato. Nessun nuovo render può partire da questa schermata: controlla i rilievi e prepara un nuovo episodio corretto.</p>
+  </div>
+  <div class="stage-actions">
+    <a class="button" href="#quality-gate">Vedi rilievi QC</a>
+  </div>
+
+  {% elif not has_qc %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 5 • COSTO REALE</p>
+    <h2 id="next-stage-title">Render finale e controllo qualità</h2>
+    <p>Veo genererà le scene approvate; il worker assemblerà video, Short, thumbnail e report QC.</p>
+  </div>
+  <form class="stage-actions paid-stage" action="/episodes/{{ episode.id }}/run" method="post">
+    <input type="hidden" name="through_step" value="qc">
+    <input type="hidden" name="queued" value="true">
+    <label class="confirm-check">
+      <input type="checkbox" name="confirm_cost" value="true" required>
+      <span>Confermo il costo residuo stimato di <strong>${{ "%.2f"|format(remaining_estimated_cost) }}</strong></span>
+    </label>
+    <button class="button button-primary" type="submit">Avvia render + QC</button>
+  </form>
+
+  {% elif episode.status.value not in ['approved', 'scheduled', 'published'] %}
+  <div class="stage-copy">
+    <p class="eyebrow">FASE 6 • REVISIONE UMANA</p>
+    <h2 id="next-stage-title">Approva il pacchetto finale</h2>
+    <p>Guarda integralmente video e Short, ascolta l’audio e controlla thumbnail e report prima dell’approvazione.</p>
+  </div>
+  <form class="stage-actions" action="/episodes/{{ episode.id }}/approve" method="post">
+    <button class="button button-success" type="submit">Approva finale</button>
+  </form>
+
+  {% else %}
+  <div class="stage-copy">
+    <p class="eyebrow">PRODUZIONE COMPLETATA</p>
+    <h2 id="next-stage-title">Episodio approvato</h2>
+    <p>Il pacchetto ha superato il QC ed è stato approvato manualmente.</p>
+  </div>
+  <div class="stage-actions">
+    <span class="status status-approved">approvato</span>
+  </div>
+  {% endif %}
 </section>
+
+{% if settings.app_env == 'production' %}
+<div class="notice production-notice">
+  <strong>Produzione controllata:</strong> ogni fase parte separatamente. Musica e video richiedono una conferma esplicita del costo e non sono disponibili durante un job attivo.
+</div>
+{% endif %}
+
+{% if settings.youtube_enabled and episode.status.value in ['approved', 'scheduled', 'published'] %}
+<section class="secondary-actions" aria-label="Azioni YouTube">
+  {% if episode.status.value == 'approved' %}
+  <form action="/episodes/{{ episode.id }}/youtube" method="post">
+    <button class="button button-success" type="submit">Carica privato su YouTube</button>
+  </form>
+  {% endif %}
+  {% if episode.publish_records %}
+  <form action="/episodes/{{ episode.id }}/analytics/sync" method="post">
+    <button class="button" type="submit">Sincronizza Analytics</button>
+  </form>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if jobs %}
 <section class="panel">
-  <div class="panel-title"><div><p class="eyebrow">WORKER</p><h2>Stato produzione</h2></div></div>
-  <div class="asset-table">
-    {% for job in jobs %}
-    <div class="asset-row">
-      <span class="status status-{{ job.status.value }}">{{ job.status.value }}</span>
-      <span>{{ job.job_type }}</span>
-      <span>#{{ job.attempt }}</span>
-      <span>{{ job.started_at or 'in attesa' }}</span>
-      <span>{{ job.error_text or '—' }}</span>
-      <a href="/api/jobs/{{ job.id }}">JSON</a>
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">WORKER</p>
+      <h2>Stato produzione</h2>
     </div>
-    {% endfor %}
+  </div>
+  <div class="job-table-wrap" tabindex="0" aria-label="Ultime esecuzioni della pipeline">
+    <table class="job-table">
+      <caption class="sr-only">Ultime esecuzioni della pipeline</caption>
+      <thead>
+        <tr>
+          <th scope="col">Stato</th>
+          <th scope="col">Fase richiesta</th>
+          <th scope="col">Tentativo</th>
+          <th scope="col">Avvio</th>
+          <th scope="col">Esito</th>
+          <th scope="col">Dettagli</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in jobs %}
+        <tr>
+          <td><span class="status status-{{ job.status.value }}">{{ job.status.value }}</span></td>
+          <td>
+            <strong>{{ job.payload_json.get('through_step', job.job_type).replace('_', ' ') }}</strong>
+            <small>{{ job.job_type }}</small>
+          </td>
+          <td>#{{ job.attempt }}</td>
+          <td>{{ job.started_at or 'in attesa' }}</td>
+          <td class="{{ 'job-error' if job.error_text else '' }}">
+            {% if job.error_text %}
+              {{ job.error_text }}
+            {% elif job.result_json.get('completed_step') %}
+              completata: {{ job.result_json.get('completed_step').replace('_', ' ') }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td><a href="/api/jobs/{{ job.id }}">JSON</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
 </section>
 {% endif %}
+
 <section class="detail-grid">
-  <article class="panel"><div class="panel-title"><div><p class="eyebrow">SPECIFICHE</p><h2>Brief</h2></div></div>
-    <dl class="specs"><div><dt>Target</dt><dd>{{ episode.age_min_months }}–{{ episode.age_max_months }} mesi</dd></div><div><dt>Durata</dt><dd>{{ episode.duration_seconds }} secondi</dd></div><div><dt>Tempo</dt><dd>{{ episode.bpm }} BPM</dd></div><div><dt>Lingua</dt><dd>{{ episode.language|upper }}</dd></div></dl>
-    <div class="tags top-gap">{% for word in episode.target_words %}<span>{{ word }}</span>{% endfor %}</div>
+  <article class="panel">
+    <div class="panel-title">
+      <div>
+        <p class="eyebrow">SPECIFICHE</p>
+        <h2>Brief</h2>
+      </div>
+    </div>
+    <dl class="specs">
+      <div><dt>Target</dt><dd>{{ episode.age_min_months }}–{{ episode.age_max_months }} mesi</dd></div>
+      <div><dt>Durata</dt><dd>{{ episode.duration_seconds }} secondi</dd></div>
+      <div><dt>Tempo</dt><dd>{{ episode.bpm }} BPM</dd></div>
+      <div><dt>Lingua</dt><dd>{{ episode.language|upper }}</dd></div>
+    </dl>
+    <div class="tags top-gap">
+      {% for word in episode.target_words %}<span>{{ word }}</span>{% endfor %}
+    </div>
   </article>
-  <article class="panel"><div class="panel-title"><div><p class="eyebrow">QUALITY GATE</p><h2>Controllo automatico</h2></div></div>
-    {% if episode.qc_json %}<div class="qc-score {{ 'qc-pass' if episode.qc_json.get('passed') else 'qc-fail' }}"><strong>{{ episode.qc_json.get('score',0) }}</strong><span>/100</span></div>{% if episode.qc_json.get('findings') %}<ul class="findings">{% for finding in episode.qc_json.get('findings') %}<li>{{ finding }}</li>{% endfor %}</ul>{% else %}<p class="good">Nessun rilievo strutturale. Serve comunque revisione editoriale umana.</p>{% endif %}{% else %}<p class="muted">Esegui la pipeline fino al QC.</p>{% endif %}
+
+  <article class="panel" id="quality-gate">
+    <div class="panel-title">
+      <div>
+        <p class="eyebrow">QUALITY GATE</p>
+        <h2>Controllo automatico</h2>
+      </div>
+    </div>
+    {% if episode.qc_json %}
+    <div class="qc-score {{ 'qc-pass' if episode.qc_json.get('passed') else 'qc-fail' }}">
+      <strong>{{ episode.qc_json.get('score',0) }}</strong><span>/100</span>
+    </div>
+    {% if episode.qc_json.get('findings') %}
+    <ul class="findings">
+      {% for finding in episode.qc_json.get('findings') %}<li>{{ finding }}</li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="good">Nessun rilievo strutturale. Serve comunque revisione editoriale umana.</p>
+    {% endif %}
+    {% else %}
+    <p class="muted">Il QC sarà disponibile soltanto dopo le approvazioni editoriali e il render.</p>
+    {% endif %}
   </article>
 </section>
-<section class="panel"><div class="panel-title"><div><p class="eyebrow">COERENZA PERSONAGGIO</p><h2>Frame di riferimento</h2></div></div>
-  <p class="muted">Carica una tavola approvata. In modalità live viene passata a Veo come riferimento del soggetto, per preservare l’aspetto di Nuvibù tra le scene.</p>
-  <form class="upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data"><input type="file" name="file" accept="image/png,image/jpeg,image/webp" required><button class="button">Carica riferimento</button></form>
-  {% if assets_by_kind.get('character_reference') %}<img class="reference-preview" src="/assets/{{ assets_by_kind.get('character_reference')[0].id }}" alt="Frame personaggio">{% endif %}
+
+<section class="panel" id="character-reference">
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">COERENZA PERSONAGGIO</p>
+      <h2>Frame di riferimento</h2>
+    </div>
+    {% if has_reference %}<span class="status status-approved">caricato</span>{% endif %}
+  </div>
+  <p class="muted">La tavola approvata viene passata a Veo come riferimento del soggetto per preservare l’aspetto di Nuvibù tra le scene.</p>
+
+  {% if has_reference and assets_by_kind.get('character_reference') %}
+  <img class="reference-preview" src="/assets/{{ assets_by_kind.get('character_reference')[0].id }}" alt="Frame personaggio approvato">
+  {% endif %}
+
+  {% if active_job %}
+  <p class="locked-note">La reference non può essere modificata mentre il worker è attivo.</p>
+  {% elif not has_reference and has_music and storyboard_approved %}
+  <form class="upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data">
+    <label for="character-reference-file">Immagine approvata
+      <input id="character-reference-file" type="file" name="file" accept="image/png,image/jpeg,image/webp" required>
+    </label>
+    <button class="button button-primary" type="submit">Carica riferimento</button>
+  </form>
+  {% elif not has_reference %}
+  <p class="locked-note">Il caricamento si sblocca dopo l’approvazione dello storyboard e la generazione della musica.</p>
+  {% else %}
+  <p class="locked-note">La reference è bloccata per questo episodio. Se vuoi cambiarla, crea un nuovo episodio: in questo modo media e costi già registrati restano intatti e verificabili.</p>
+  {% endif %}
 </section>
-{% if assets_by_kind.get('render') %}<section class="panel media-panel"><div class="panel-title"><div><p class="eyebrow">VIDEO PRINCIPALE</p><h2>Anteprima 16:9</h2></div><a class="button" href="/assets/{{ assets_by_kind.get('render')[0].id }}">Scarica MP4</a></div><video controls preload="metadata" src="/assets/{{ assets_by_kind.get('render')[0].id }}"></video></section>{% endif %}
-{% if assets_by_kind.get('short') %}<section class="detail-grid"><article class="panel media-panel"><div class="panel-title"><div><p class="eyebrow">SHORT</p><h2>Anteprima 9:16</h2></div><a class="button" href="/assets/{{ assets_by_kind.get('short')[0].id }}">Scarica</a></div><video class="short-video" controls preload="metadata" src="/assets/{{ assets_by_kind.get('short')[0].id }}"></video></article><article class="panel"><div class="panel-title"><div><p class="eyebrow">THUMBNAIL</p><h2>Copertina</h2></div></div>{% if assets_by_kind.get('thumbnail') %}<img class="thumbnail-preview" src="/assets/{{ assets_by_kind.get('thumbnail')[0].id }}" alt="Thumbnail">{% endif %}</article></section>{% endif %}
+
+{% if assets_by_kind.get('render') %}
+<section class="panel media-panel">
+  <div class="panel-title">
+    <div><p class="eyebrow">VIDEO PRINCIPALE</p><h2>Anteprima 16:9</h2></div>
+    <a class="button" href="/assets/{{ assets_by_kind.get('render')[0].id }}">Scarica MP4</a>
+  </div>
+  <video controls preload="metadata" src="/assets/{{ assets_by_kind.get('render')[0].id }}"></video>
+</section>
+{% endif %}
+
+{% if assets_by_kind.get('short') %}
 <section class="detail-grid">
-  <article class="panel"><div class="panel-title"><div><p class="eyebrow">CANZONE</p><h2>Testo</h2></div></div>{% if episode.lyrics_text %}<pre class="lyrics">{{ episode.lyrics_text }}</pre>{% else %}<p class="muted">Non ancora generato.</p>{% endif %}</article>
-  <article class="panel"><div class="panel-title"><div><p class="eyebrow">REGIA</p><h2>Storyboard</h2></div></div>{% if episode.storyboard_json %}<ol class="storyboard">{% for scene in episode.storyboard_json %}<li><span>{{ scene.start_seconds }}–{{ scene.start_seconds + scene.duration_seconds }}s</span><p><strong>{{ scene.word }}</strong><br>{{ scene.action }}</p></li>{% endfor %}</ol>{% else %}<p class="muted">Non ancora generato.</p>{% endif %}</article>
+  <article class="panel media-panel">
+    <div class="panel-title">
+      <div><p class="eyebrow">SHORT</p><h2>Anteprima 9:16</h2></div>
+      <a class="button" href="/assets/{{ assets_by_kind.get('short')[0].id }}">Scarica</a>
+    </div>
+    <video class="short-video" controls preload="metadata" src="/assets/{{ assets_by_kind.get('short')[0].id }}"></video>
+  </article>
+  <article class="panel">
+    <div class="panel-title"><div><p class="eyebrow">THUMBNAIL</p><h2>Copertina</h2></div></div>
+    {% if assets_by_kind.get('thumbnail') %}
+    <img class="thumbnail-preview" src="/assets/{{ assets_by_kind.get('thumbnail')[0].id }}" alt="Thumbnail">
+    {% endif %}
+  </article>
 </section>
-<section class="panel"><div class="panel-title"><div><p class="eyebrow">GROWTH LAB</p><h2>{{ growth.score }}/100 • confidenza {{ growth.confidence }}</h2></div><a class="button" href="/growth">Apri report</a></div><p>{{ growth.recommendation }}</p></section>
-<section class="panel"><div class="panel-title"><div><p class="eyebrow">PROVENIENZA</p><h2>Registro asset</h2></div></div>{% if episode.assets %}<div class="asset-table">{% for asset in episode.assets %}<div class="asset-row"><span class="asset-kind">{{ asset.kind.value }}</span><span>{{ asset.provider }}</span><span>v{{ asset.variant }}</span><span>{{ asset.width or '—' }}×{{ asset.height or '—' }}</span><span>${{ "%.3f"|format(asset.cost_usd) }}</span><a href="/assets/{{ asset.id }}">Apri</a></div>{% endfor %}</div>{% endif %}</section>
+{% endif %}
+
+<section class="detail-grid">
+  <article class="panel" id="lyrics-review">
+    <div class="panel-title">
+      <div><p class="eyebrow">CANZONE</p><h2>Testo</h2></div>
+      {% if lyrics_approved %}<span class="status status-approved">approvato</span>{% endif %}
+    </div>
+    {% if episode.lyrics_text %}
+      {% if has_lyrics and not lyrics_approved and not active_job %}
+      <form class="review-form" action="/episodes/{{ episode.id }}/lyrics" method="post">
+        <label for="lyrics-text">Testo da revisionare</label>
+        <textarea id="lyrics-text" name="lyrics_text" rows="18" minlength="20" maxlength="4000" required>{{ episode.lyrics_text }}</textarea>
+        <div class="review-actions">
+          <button class="button" type="submit">Salva modifiche</button>
+          <button class="button button-success" type="submit" formaction="/episodes/{{ episode.id }}/lyrics/approve">Approva il testo mostrato</button>
+        </div>
+      </form>
+      {% else %}
+      <pre class="lyrics">{{ episode.lyrics_text }}</pre>
+      {% endif %}
+    {% else %}
+    <p class="muted">Non ancora generato.</p>
+    {% endif %}
+  </article>
+
+  <article class="panel" id="storyboard-review">
+    <div class="panel-title">
+      <div><p class="eyebrow">REGIA</p><h2>Storyboard</h2></div>
+      {% if storyboard_approved %}<span class="status status-approved">approvato</span>{% endif %}
+    </div>
+    {% if episode.storyboard_json %}
+    <ol class="storyboard">
+      {% for scene in episode.storyboard_json %}
+      <li>
+        <span>{{ scene.start_seconds }}–{{ scene.start_seconds + scene.duration_seconds }}s</span>
+        <p><strong>{{ scene.word }}</strong><br>{{ scene.action }}</p>
+      </li>
+      {% endfor %}
+    </ol>
+    {% if has_storyboard and not storyboard_approved and not active_job %}
+    <form class="approval-form" action="/episodes/{{ episode.id }}/storyboard/approve" method="post">
+      <p>L’approvazione blocca la regia editoriale e abilita la prima fase a pagamento.</p>
+      <button class="button button-success" type="submit">Approva storyboard</button>
+    </form>
+    {% endif %}
+    {% else %}
+    <p class="muted">Non ancora generato.</p>
+    {% endif %}
+  </article>
+</section>
+
+<section class="panel">
+  <div class="panel-title">
+    <div><p class="eyebrow">GROWTH LAB</p><h2>{{ growth.score }}/100 • confidenza {{ growth.confidence }}</h2></div>
+    <a class="button" href="/growth">Apri report</a>
+  </div>
+  <p>{{ growth.recommendation }}</p>
+</section>
+
+<section class="panel">
+  <div class="panel-title">
+    <div><p class="eyebrow">PROVENIENZA</p><h2>Registro asset</h2></div>
+  </div>
+  {% if episode.assets %}
+  <div class="asset-table">
+    {% for asset in episode.assets %}
+    <div class="asset-row">
+      <span class="asset-kind">{{ asset.kind.value }}</span>
+      <span>{{ asset.provider }}</span>
+      <span>v{{ asset.variant }}</span>
+      <span>{{ asset.width or '—' }}×{{ asset.height or '—' }}</span>
+      <span>${{ "%.3f"|format(asset.cost_usd) }}</span>
+      <a href="/assets/{{ asset.id }}">Apri</a>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
 {% endblock %}

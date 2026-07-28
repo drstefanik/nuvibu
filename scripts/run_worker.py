@@ -17,16 +17,25 @@ from app.models import Job, JobStatus
 from app.services.pipeline import PipelineService
 
 
+def job_claim_query(requested_job_id: str | None):
+    query = select(Job).where(Job.status == JobStatus.PENDING)
+    if requested_job_id:
+        # A Cloud Run execution targets one exact database job. Wait for a
+        # short reservation transaction instead of skipping the locked row and
+        # wasting the execution.
+        return query.where(Job.id == requested_job_id).with_for_update().limit(1)
+    return (
+        query.order_by(Job.created_at.asc(), Job.id.asc())
+        .with_for_update(skip_locked=True)
+        .limit(1)
+    )
+
+
 def process_once() -> bool:
     requested_job_id = os.getenv("NUVIBU_JOB_ID")
     with SessionLocal() as db:
         with db.begin():
-            query = select(Job).where(Job.status == JobStatus.PENDING)
-            if requested_job_id:
-                query = query.where(Job.id == requested_job_id)
-            else:
-                query = query.order_by(Job.created_at.asc(), Job.id.asc())
-            job = db.scalar(query.with_for_update(skip_locked=True).limit(1))
+            job = db.scalar(job_claim_query(requested_job_id))
             if job is None:
                 if requested_job_id:
                     requested = db.get(Job, requested_job_id)

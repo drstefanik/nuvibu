@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Accedi • Nuvibù Studio</title>
+  <link rel="icon" type="image/png" href="/static/nuvibu-avatar.png">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-shell">
+<main class="login-layout">
+  <section class="login-story">
+    <a class="brand login-brand" href="/login">
+      <img class="brand-logo" src="/static/nuvibu-avatar.png" alt="Nuvibù">
+      <span><strong>Nuvibù Studio</strong><small>KIDS CONTENT ENGINE</small></span>
+    </a>
+    <div>
+      <p class="eyebrow">CONSOLE PRIVATA</p>
+      <h1>Ogni grande episodio comincia da una piccola idea.</h1>
+      <p>Canzone, regia, animazione e controllo qualità in un unico studio protetto.</p>
+    </div>
+    <div class="login-orbit" aria-hidden="true">
+      <img src="/static/nuvibu-avatar.png" alt="">
+      <span class="orbit-dot dot-one"></span>
+      <span class="orbit-dot dot-two"></span>
+      <span class="orbit-dot dot-three"></span>
+    </div>
+  </section>
+  <section class="login-card">
+    <div>
+      <p class="eyebrow">BENTORNATO</p>
+      <h2>Accedi allo studio</h2>
+      <p class="muted">Usa le credenziali amministratore definite durante il deploy.</p>
+    </div>
+    {% if error %}<div class="login-error" id="login-error" role="alert">{{ error }}</div>{% endif %}
+    <form action="/login" method="post">
+      <input type="hidden" name="next" value="{{ next_path }}">
+      <label>Nome utente
+        <input name="username" autocomplete="username" required autofocus{% if error %} aria-invalid="true" aria-describedby="login-error"{% endif %}>
+      </label>
+      <label>Password
+        <input type="password" name="password" autocomplete="current-password" required{% if error %} aria-invalid="true" aria-describedby="login-error"{% endif %}>
+      </label>
+      <button class="button button-primary login-submit" type="submit">Entra in Nuvibù Studio</button>
+    </form>
+    <p class="login-note">Sessione protetta • nessuna credenziale viene salvata nel browser in chiaro</p>
+  </section>
+</main>
+</body>
+</html>

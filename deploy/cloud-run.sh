@@ -14,7 +14,7 @@ WORKER_JOB="nuvibu-worker"
 WEB_SA="nuvibu-web@${PROJECT_ID}.iam.gserviceaccount.com"
 WORKER_SA="nuvibu-worker@${PROJECT_ID}.iam.gserviceaccount.com"
 
-for command_name in gcloud git python3; do
+for command_name in curl gcloud git python3; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "Missing required command: ${command_name}" >&2
     exit 1
@@ -233,7 +233,7 @@ gcloud builds submit \
   --project "${PROJECT_ID}" \
   --tag "${IMAGE}" .
 
-COMMON_ENV="APP_ENV=production,PROVIDER_MODE=live,STORAGE_BACKEND=gcs_mount,STORAGE_ROOT=/mnt/nuvibu,VEO_BACKEND=${VEO_BACKEND},VEO_MODEL=${VEO_MODEL},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${VEO_LOCATION},MAX_EPISODE_SECONDS=30,MAX_MUSIC_VARIANTS=1,MAX_SCENE_RETRIES=0,MAX_ESTIMATED_COST_USD_PER_EPISODE=10,CLOUD_RUN_DISPATCH_RETRY_SECONDS=180,JOB_STALE_AFTER_SECONDS=3900"
+COMMON_ENV="APP_ENV=production,PROVIDER_MODE=live,STORAGE_BACKEND=gcs_mount,STORAGE_ROOT=/mnt/nuvibu,VEO_BACKEND=${VEO_BACKEND},VEO_MODEL=${VEO_MODEL},GOOGLE_CLOUD_PROJECT=${PROJECT_ID},GOOGLE_CLOUD_LOCATION=${VEO_LOCATION},MAX_EPISODE_SECONDS=30,MAX_MUSIC_VARIANTS=1,MAX_SCENE_RETRIES=0,MAX_ESTIMATED_COST_USD_PER_EPISODE=10,MAX_DAILY_ESTIMATED_COST_USD=10,CLOUD_RUN_DISPATCH_RETRY_SECONDS=180,JOB_STALE_AFTER_SECONDS=3900"
 if [[ "${VEO_BACKEND}" == "vertex" ]]; then
   COMMON_ENV+=",VEO_OUTPUT_GCS_URI=${VEO_OUTPUT_GCS_URI}"
 fi
@@ -262,6 +262,14 @@ gcloud run jobs add-iam-policy-binding "${WORKER_JOB}" \
   --member "serviceAccount:${WEB_SA}" \
   --role roles/run.jobsExecutorWithOverrides >/dev/null
 
+EXISTING_SERVICE_URL="$(
+  gcloud run services describe "${WEB_SERVICE}" \
+    --project "${PROJECT_ID}" \
+    --region "${RUN_REGION}" \
+    --format='value(status.url)' 2>/dev/null || true
+)"
+INITIAL_APP_BASE_URL="${EXISTING_SERVICE_URL:-https://placeholder.invalid}"
+
 gcloud run deploy "${WEB_SERVICE}" \
   --project "${PROJECT_ID}" \
   --image "${IMAGE}" \
@@ -274,7 +282,7 @@ gcloud run deploy "${WEB_SERVICE}" \
   --min-instances 0 \
   --max-instances 1 \
   --allow-unauthenticated \
-  --set-env-vars "${COMMON_ENV},RUNTIME_ROLE=web,CLOUD_RUN_JOB_NAME=${WORKER_JOB},CLOUD_RUN_JOB_LOCATION=${RUN_REGION},APP_BASE_URL=https://placeholder.invalid" \
+  --set-env-vars "${COMMON_ENV},RUNTIME_ROLE=web,CLOUD_RUN_JOB_NAME=${WORKER_JOB},CLOUD_RUN_JOB_LOCATION=${RUN_REGION},APP_BASE_URL=${INITIAL_APP_BASE_URL}" \
   --set-secrets "DATABASE_URL=database-url:${DATABASE_SECRET_VERSION},ADMIN_USERNAME=admin-username:${ADMIN_USERNAME_SECRET_VERSION},ADMIN_PASSWORD=admin-password:${ADMIN_PASSWORD_SECRET_VERSION},SECRET_KEY=app-secret-key:${APP_SECRET_VERSION}" \
   --add-volume "${VOLUME_SPEC}"
 
@@ -288,6 +296,14 @@ gcloud run services update "${WEB_SERVICE}" \
   --project "${PROJECT_ID}" \
   --region "${RUN_REGION}" \
   --update-env-vars "APP_BASE_URL=${SERVICE_URL}" >/dev/null
+
+curl --fail --silent --show-error "${SERVICE_URL}/health" >/dev/null
+curl --fail --silent --show-error "${SERVICE_URL}/readyz" >/dev/null
+LOGIN_PAGE="$(curl --fail --silent --show-error "${SERVICE_URL}/login")"
+if [[ "${LOGIN_PAGE}" != *"Accedi allo studio"* ]]; then
+  echo "Login smoke test failed for ${SERVICE_URL}/login" >&2
+  exit 1
+fi
 
 echo "Nuvibu web: ${SERVICE_URL}"
 echo "Worker job: ${WORKER_JOB} (${RUN_REGION})"

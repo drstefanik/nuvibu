@@ -8,14 +8,27 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<a class="skip-link" href="#main-content">Salta al contenuto</a>
 <header class="topbar">
   <a class="brand" href="/">
     <img class="brand-logo" src="/static/nuvibu-avatar.png" alt="Nuvibù">
     <span><strong>Nuvibù Studio</strong><small>KIDS CONTENT ENGINE</small></span>
   </a>
-  <nav><a href="/growth">Growth Lab</a><a class="button button-primary" href="/episodes/new">Nuovo episodio</a><span class="mode {{ 'mode-live' if settings.provider_mode == 'live' else '' }}">{{ settings.provider_mode|upper }}</span></nav>
+  <nav aria-label="Navigazione principale">
+    <a href="/growth">Growth Lab</a>
+    <a class="button button-primary nav-new" href="/episodes/new" aria-label="Nuovo episodio">
+      <span class="nav-new-icon" aria-hidden="true">+</span>
+      <span class="nav-new-label">Nuovo episodio</span>
+    </a>
+    <span class="mode {{ 'mode-live' if settings.provider_mode == 'live' else '' }}">
+      {{ 'LIVE • COSTI ATTIVI' if settings.provider_mode == 'live' else 'MOCK • SENZA COSTI' }}
+    </span>
+    <form class="logout-form" action="/logout" method="post">
+      <button class="button button-quiet" type="submit">Esci</button>
+    </form>
+  </nav>
 </header>
-<main class="page">{% block content %}{% endblock %}</main>
+<main class="page" id="main-content">{% block content %}{% endblock %}</main>
 <footer>Console privata • revisione umana obbligatoria • upload YouTube inizialmente privato</footer>
 </body>
 </html>

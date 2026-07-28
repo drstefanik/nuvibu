@@ -24,7 +24,9 @@ L'identità pubblica di lavoro è **Nuvibù**. La direzione visiva corrente usa 
 - raccolta metriche e Growth Lab;
 - SQLite locale, PostgreSQL/Neon in produzione;
 - worker separato per i job lunghi;
-- autenticazione Basic obbligatoria in produzione per la console privata;
+- login amministratore con sessione firmata e cookie sicuro in produzione;
+- approvazioni separate di testo e storyboard prima di usare provider a pagamento;
+- conferma esplicita del costo per musica e render;
 - ripresa delle operazioni Veo e ledger incrementale per evitare duplicazioni di costo;
 - deploy ripetibile su Cloud Run con service account separati.
 
@@ -57,8 +59,12 @@ La modalità mock usa queste immagini approvate per creare preview animate con p
 ```text
 Brief
   → testo e metadati
-  → varianti musicali
+  → revisione e approvazione testo
   → storyboard
+  → revisione e approvazione storyboard
+  → conferma costo e musica
+  → reference personaggio approvata
+  → conferma costo e scene AI
   → scene AI con character reference
   → video 16:9
   → Short 9:16 + thumbnail
@@ -119,13 +125,18 @@ repository o nell'immagine.
 
 ```dotenv
 MAX_ESTIMATED_COST_USD_PER_EPISODE=40
+MAX_DAILY_ESTIMATED_COST_USD=40
 MAX_MUSIC_VARIANTS=1
 MAX_SCENE_RETRIES=0
 ```
 
-La pipeline interrompe il job quando la stima supera il tetto configurato. Per
-il pilota Cloud Run imposta anche un massimo di 30 secondi e 10 USD. I costi
-registrati vanno riconciliati con i pannelli dei provider.
+La pipeline interrompe il job quando la stima supera il tetto per episodio o
+quello giornaliero. Per il pilota Cloud Run imposta un massimo di 30 secondi,
+10 USD per episodio e 10 USD al giorno. Musica e render partono soltanto dopo
+una conferma esplicita nella console. I costi registrati vanno riconciliati con
+i pannelli dei provider. Il limite giornaliero comprende anche la spesa
+prenotata dai job attivi; un esito provider ambiguo conserva job e prenotazione
+finché la stessa operazione non viene ripresa o riconciliata.
 
 ## Collegare YouTube
 
@@ -185,7 +196,9 @@ pytest
 python -m compileall app scripts tests
 ```
 
-I test coprono slug, storyboard, safety, prudenza del Growth Lab e pipeline mock completa con render, Short, thumbnail e report QC.
+I test coprono autenticazione, approvazioni editoriali, guardrail di spesa,
+ripresa sicura dei job, integrità media e pipeline mock completa con render,
+Short, thumbnail e report QC.
 
 ## Docker
 

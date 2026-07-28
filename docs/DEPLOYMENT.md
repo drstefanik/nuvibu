@@ -60,11 +60,18 @@ Lo script:
 - configura `VEO_OUTPUT_GCS_URI` nello stesso bucket montato;
 - crea un job con una sola task, un'ora di timeout e zero retry automatici;
 - autorizza il web a eseguire quel job con l'ID esatto del job applicativo;
-- pubblica la console con Basic Auth su HTTPS.
+- pubblica la console con login amministratore e sessione HTTPS sicura.
 
 I retry Cloud Run sono intenzionalmente disattivati: la pipeline salva ogni
 asset completato e l'ID dell'operazione Veo, quindi una ripresa esplicita non
 duplica una generazione pagata.
+
+Il tetto giornaliero include sia i costi già registrati sia le prenotazioni dei
+job attivi. Se l'esito di una chiamata ElevenLabs o Veo è ambiguo, lo stesso job
+resta in attesa con la prenotazione conservata finché la ricevuta o l'operazione
+non viene ripresa o riconciliata. Gli asset pagati ma non più validi restano nel
+ledger storico: non eliminare job, ricevute o righe di costo per aggirare questo
+blocco.
 
 ## Variabili rilevanti
 
@@ -84,6 +91,7 @@ MAX_EPISODE_SECONDS=30
 MAX_MUSIC_VARIANTS=1
 MAX_SCENE_RETRIES=0
 MAX_ESTIMATED_COST_USD_PER_EPISODE=10
+MAX_DAILY_ESTIMATED_COST_USD=10
 ```
 
 Il servizio web non riceve chiavi provider. Il worker riceve soltanto la chiave
@@ -115,23 +123,34 @@ create da AI Studio sono già limitate a Gemini.
 
 ```bash
 curl -fsS "$(gcloud run services describe nuvibu-web \
-  --project nuvibu --region us-central1 --format='value(status.url)')/healthz"
+  --project nuvibu --region us-central1 --format='value(status.url)')/health"
 
 curl -fsS "$(gcloud run services describe nuvibu-web \
   --project nuvibu --region us-central1 --format='value(status.url)')/readyz"
 ```
 
-La seconda chiamata deve restituire database e storage `ok`. La console richiede
-le credenziali Basic Auth definite durante il deploy.
+La seconda chiamata deve restituire database e storage `ok`. La console mostra
+la pagina di accesso e usa le credenziali amministratore definite durante il
+deploy.
 
 ## Primo pilota
 
-1. Creare un episodio di 20–30 secondi.
-2. Caricare la reference approvata di Nuvibù.
-3. Controllare la stima costo prima di accodare.
-4. Accodare una sola volta e seguire lo stato del worker nella pagina episodio.
-5. Revisionare integralmente testo, audio, scene, Short e QC.
-6. Non pubblicare la thumbnail di concept: resta marcata `CONCEPT PREVIEW`.
+1. Accedere alla console con le credenziali amministratore del deploy.
+2. Creare un episodio di 20–30 secondi, ritmo delicato e una sola parola target.
+3. Generare il testo gratuitamente, correggerlo e approvarlo.
+4. Generare lo storyboard gratuitamente, controllarlo scena per scena e
+   approvarlo.
+5. Confermare il costo musicale, accodare una sola variante e ascoltarla
+   integralmente.
+6. Caricare la reference definitiva di Nuvibù.
+7. Confermare il costo residuo e accodare una sola volta render e QC.
+8. Seguire il worker nella pagina episodio, quindi revisionare integralmente
+   audio, video, Short, thumbnail e report.
+9. Non pubblicare la thumbnail di concept: resta marcata `CONCEPT PREVIEW`.
+
+Ogni fase è bloccata fino al completamento e all'approvazione della precedente.
+Un QC non superato richiede revisione manuale e un nuovo episodio corretto:
+la console non offre un rerender automatico che potrebbe duplicare la spesa.
 
 YouTube è una fase successiva. Il token OAuth deve stare in un percorso
 scrivibile del bucket montato, perché il client aggiorna il refresh token; non
