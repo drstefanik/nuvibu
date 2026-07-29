@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
+import numpy as np
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
@@ -13,6 +14,10 @@ from sqlalchemy.orm import sessionmaker
 from app.config import Settings
 from app.database import Base
 from app.main import worker_dispatch_due
+from app.media import (
+    MUSIC_MIN_LOW_BAND_ENERGY_RATIO,
+    _music_arrangement_metrics_from_samples,
+)
 from app.models import Asset, AssetKind, EpisodeStatus, Job, JobStatus
 from app.providers.base import VideoResult
 from app.providers.elevenlabs import (
@@ -573,6 +578,14 @@ def test_completed_music_before_ledger_resumes_the_same_reserved_job(
         db.refresh(job)
         assert job.status == JobStatus.PENDING
 
+        monkeypatch.setattr(
+            "app.services.pipeline.music_arrangement_quality",
+            lambda _path: {
+                "passed": True,
+                "reason": "instrumental_low_end_present",
+                "low_band_energy_ratio": 0.02,
+            },
+        )
         resumed = PipelineService(db, settings).process_job(job)
 
         assert resumed.id == original_job_id
@@ -783,6 +796,15 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
         for chunk in plan["chunks"]
     )
     assert all(chunk["context_adherence"] == "high" for chunk in plan["chunks"])
+    first_styles = set(plan["chunks"][0]["positive_styles"])
+    assert "full instrumental backing under every sung line" in first_styles
+    assert "audible warm bass groove throughout" in first_styles
+    assert "bright ukulele chord strumming throughout" in first_styles
+    assert "instrumental hook starts in the first second" in first_styles
+    assert "a cappella" in plan["chunks"][0]["negative_styles"]
+    chorus_styles = set(plan["chunks"][1]["positive_styles"])
+    assert "full-band chorus lift" in chorus_styles
+    assert "stronger kick and bass" in chorus_styles
     assert result.path == output
     assert result.metadata["song_id"] == "song-structured"
 
@@ -847,3 +869,92 @@ def test_music_validation_error_is_actionable_and_retryable(
         )
 
     assert not music_receipt_path(output).exists()
+
+
+def test_music_arrangement_gate_rejects_voice_only_and_accepts_bass_and_drums():
+    sample_rate = 24_000
+    time_axis = np.arange(sample_rate * 4, dtype=np.float32) / sample_rate
+    voice_only = 0.4 * np.sin(2 * np.pi * 440 * time_axis)
+    voice_metrics = _music_arrangement_metrics_from_samples(
+        voice_only,
+        sample_rate=sample_rate,
+    )
+
+    arranged = (
+        voice_only
+        + 0.28 * np.sin(2 * np.pi * 90 * time_axis)
+        + 0.10 * np.sin(2 * np.pi * 120 * time_axis)
+    )
+    arranged_metrics = _music_arrangement_metrics_from_samples(
+        arranged,
+        sample_rate=sample_rate,
+    )
+
+    assert voice_metrics["passed"] is False
+    assert (
+        voice_metrics["low_band_energy_ratio"]
+        < MUSIC_MIN_LOW_BAND_ENERGY_RATIO
+    )
+    assert arranged_metrics["passed"] is True
+    assert (
+        arranged_metrics["low_band_energy_ratio"]
+        >= MUSIC_MIN_LOW_BAND_ENERGY_RATIO
+    )
+
+
+def test_paid_voice_only_music_is_preserved_deselected_and_retryable(
+    tmp_path: Path,
+    monkeypatch,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'release-guards.db'}",
+        storage_root=tmp_path / "storage",
+        provider_mode="live",
+    )
+    settings.ensure_directories()
+    monkeypatch.setattr(
+        "app.services.pipeline.music_arrangement_quality",
+        lambda _path: {
+            "passed": False,
+            "reason": "instrumental_backing_too_sparse_or_voice_only",
+            "low_band_energy_ratio": 0.0001,
+        },
+    )
+
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        music_path = settings.asset_dir / episode.id / "music-v1.mp3"
+        music_path.parent.mkdir(parents=True, exist_ok=True)
+        music_path.write_bytes(b"x" * 2048)
+        asset = Asset(
+            episode=episode,
+            kind=AssetKind.MUSIC,
+            provider="elevenlabs-music",
+            path=str(music_path),
+            mime_type="audio/mpeg",
+            variant=1,
+            selected=True,
+            duration_seconds=75,
+            cost_usd=0.19,
+        )
+        db.add(asset)
+        db.commit()
+
+        PipelineService(
+            db,
+            settings,
+        )._invalidate_unacceptable_music_assets(episode)
+
+        db.refresh(asset)
+        assert asset.selected is False
+        assert asset.cost_usd == pytest.approx(0.19)
+        assert asset.metadata_json["arrangement_qc"]["passed"] is False
+        assert (
+            asset.metadata_json["invalidation_reason"]
+            == "insufficient_instrumental_arrangement"
+        )
+        assert asset.metadata_json["invalidated_at"]

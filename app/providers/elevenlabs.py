@@ -74,12 +74,20 @@ def build_music_v2_composition_plan(
         durations.append(duration_ms)
         assigned += duration_ms
 
+    # ElevenLabs documents the first chunk as the strongest influence on the
+    # whole track. Repeat an explicit *band* arrangement in every chunk so the
+    # lyrics constraint cannot collapse the result into spoken or a-cappella
+    # vocals.
     global_styles = [
         f"{bpm} BPM",
         "original modern preschool pop",
         "bright major key",
-        "toy percussion and glockenspiel",
-        "polished warm production",
+        "full instrumental backing under every sung line",
+        "steady acoustic drum groove with audible kick and snare throughout",
+        "audible warm bass groove throughout",
+        "bright ukulele chord strumming throughout",
+        "glockenspiel and toy piano melodic hook",
+        "polished wide stereo mix with the lead vocal balanced over the band",
     ]
     global_negative_styles = [
         "dark",
@@ -87,17 +95,53 @@ def build_music_v2_composition_plan(
         "frightening",
         "rapid tempo changes",
         "imitation of an existing song or artist",
+        "a cappella",
+        "voice only",
+        "unaccompanied choir",
+        "spoken word",
+        "recitation",
+        "sparse backing",
+        "ambient drone",
+        "long unaccompanied vocal passages",
+        "sound effects without music",
     ]
     chunks = []
-    for (name, lines), duration_ms in zip(sections, durations, strict=True):
+    for index, ((name, lines), duration_ms) in enumerate(
+        zip(sections, durations, strict=True)
+    ):
         positive_styles = global_styles + [
             "clear warm Italian lead vocal",
             "highly intelligible Italian lyrics",
             "simple melody for very young children",
         ]
-        if "ritornello" in name.casefold() or "chorus" in name.casefold():
+        normalized_name = name.casefold()
+        if index == 0 or "intro" in normalized_name:
             positive_styles.extend(
-                ["memorable singalong hook", "gentle hand claps"]
+                [
+                    "instrumental hook starts in the first second",
+                    "rhythm section enters immediately and never drops out",
+                ]
+            )
+        if "ritornello" in normalized_name or "chorus" in normalized_name:
+            positive_styles.extend(
+                [
+                    "memorable singalong hook",
+                    "full-band chorus lift",
+                    "stronger kick and bass",
+                    "gentle hand claps",
+                    "light child backing vocals behind the lead",
+                ]
+            )
+        elif "strofa" in normalized_name or "verse" in normalized_name:
+            positive_styles.append(
+                "steady ukulele, kick, bass and glockenspiel accompaniment"
+            )
+        if "final" in normalized_name or "outro" in normalized_name:
+            positive_styles.extend(
+                [
+                    "largest full-band arrangement",
+                    "bright celebratory musical ending",
+                ]
             )
         chunks.append(
             {

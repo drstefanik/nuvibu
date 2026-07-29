@@ -20,7 +20,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import Settings
-from ..media import is_valid_video
+from ..media import is_valid_video, music_arrangement_quality
 from ..models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus
 from ..providers import get_music_provider, get_video_provider
 from ..providers.base import MusicProvider, MusicResult, VideoProvider, VideoResult
@@ -220,6 +220,33 @@ class PipelineService:
         else:
             for asset in free:
                 self.db.delete(asset)
+            self.db.commit()
+
+    def _invalidate_unacceptable_music_assets(self, episode: Episode) -> None:
+        """Preserve paid history while making failed arrangements retryable."""
+
+        if self.settings.provider_mode != "live":
+            return
+        changed = False
+        invalidated_at = datetime.now(timezone.utc).isoformat()
+        for asset in self._assets(episode, AssetKind.MUSIC):
+            metadata = dict(asset.metadata_json or {})
+            if metadata.get("invalidated_at"):
+                continue
+            quality = metadata.get("arrangement_qc")
+            if not isinstance(quality, dict) or "passed" not in quality:
+                quality = music_arrangement_quality(Path(asset.path))
+                metadata["arrangement_qc"] = quality
+                changed = True
+            if not quality.get("passed"):
+                metadata["invalidated_at"] = invalidated_at
+                metadata["invalidation_reason"] = (
+                    "insufficient_instrumental_arrangement"
+                )
+                asset.selected = False
+                changed = True
+            asset.metadata_json = metadata
+        if changed:
             self.db.commit()
 
     def _update_actual_cost(self, episode: Episode) -> None:
@@ -1020,6 +1047,10 @@ class PipelineService:
                 raise RuntimeError(
                     "Approve the current storyboard before buying music"
                 )
+        # Re-evaluate legacy/live assets created before the arrangement gate.
+        # A paid but voice-only asset stays in the ledger and is deselected,
+        # allowing an explicit retry to use a new immutable output path.
+        self._invalidate_unacceptable_music_assets(episode)
         self.assert_budget(episode)
         self.assert_daily_budget(
             self.estimate_music_cost(episode),
@@ -1098,16 +1129,45 @@ class PipelineService:
                     output_path=path,
                     variant=variant,
                 )
+            quality_failure: dict | None = None
+            if self.settings.provider_mode == "live":
+                quality = music_arrangement_quality(result.path)
+                result.metadata = {
+                    **result.metadata,
+                    "arrangement_qc": quality,
+                }
+                if not quality.get("passed"):
+                    quality_failure = quality
+                    result.metadata.update(
+                        {
+                            "invalidated_at": datetime.now(
+                                timezone.utc
+                            ).isoformat(),
+                            "invalidation_reason": (
+                                "insufficient_instrumental_arrangement"
+                            ),
+                        }
+                    )
             # Lock before the paid Asset flush. This keeps the rolling spend
             # read and reservation consumption on one side of the same short
             # serialization boundary.
             with self._daily_budget_lock():
                 self._asset(
                     episode, kind=AssetKind.MUSIC, path=result.path, mime_type="audio/mpeg", provider=result.provider,
-                    variant=result.variant, selected=result.variant == 1, duration_seconds=result.duration_seconds,
+                    variant=result.variant, selected=result.variant == 1 and quality_failure is None, duration_seconds=result.duration_seconds,
                     cost_usd=result.cost_usd, metadata=result.metadata,
                 )
                 self.db.commit()
+            if quality_failure is not None:
+                self._update_actual_cost(episode)
+                self.db.commit()
+                ratio = quality_failure.get("low_band_energy_ratio", 0.0)
+                raise RuntimeError(
+                    "ElevenLabs produced a paid audio file, but Nuvibù rejected "
+                    "it because the instrumental backing is too sparse "
+                    f"(low-band energy ratio {ratio:.6f}). The spend was "
+                    "preserved in the ledger; an explicit music retry is safe."
+                )
         valid_music_ids = {
             asset.id
             for asset in self._valid_assets(episode, AssetKind.MUSIC)
