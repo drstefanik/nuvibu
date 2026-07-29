@@ -17,6 +17,7 @@ from app.models import Asset, AssetKind, EpisodeStatus, Job, JobStatus
 from app.providers.base import VideoResult
 from app.providers.elevenlabs import (
     ElevenLabsMusicProvider,
+    build_music_v2_composition_plan,
     music_receipt_path,
     music_request_fingerprint,
 )
@@ -700,3 +701,94 @@ def test_ambiguous_music_submission_blocks_duplicate_purchase(
     with pytest.raises(RuntimeError, match="ambiguous outcome"):
         provider.generate(**request)
     assert calls == 1
+
+
+def test_music_v2_uses_exact_composition_plan_and_approved_lines(
+    tmp_path: Path,
+    monkeypatch,
+):
+    calls: list[dict] = []
+
+    class Response:
+        status_code = 200
+        headers = {
+            "content-type": "audio/mpeg",
+            "song-id": "song-structured",
+        }
+        content = b"x" * 2048
+
+        def raise_for_status(self):
+            return None
+
+    def compose(url: str, *, headers: dict, params: dict, json: dict, timeout: int):
+        calls.append(
+            {
+                "url": url,
+                "headers": headers,
+                "params": params,
+                "json": json,
+                "timeout": timeout,
+            }
+        )
+        return Response()
+
+    monkeypatch.setattr("app.providers.elevenlabs.httpx.post", compose)
+    lyrics = (
+        "[Intro]\nPio pio, eccoci qua!\n\n"
+        "[Ritornello]\nSplash splash, salta anche tu!\n"
+        "Arcobaleno con Nuvibù!"
+    )
+    provider = ElevenLabsMusicProvider(
+        api_key="secret",
+        model_id="music_v2",
+        output_format="mp3_48000_192",
+    )
+    output = tmp_path / "song.mp3"
+
+    result = provider.generate(
+        lyrics=lyrics,
+        prompt="This prompt must not replace approved lyrics",
+        duration_seconds=75,
+        bpm=112,
+        output_path=output,
+        variant=1,
+    )
+
+    payload = calls[0]["json"]
+    assert "prompt" not in payload
+    assert "music_length_ms" not in payload
+    assert payload["model_id"] == "music_v2"
+    assert payload["sign_with_c2pa"] is True
+    plan = payload["composition_plan"]
+    assert sum(section["duration_ms"] for section in plan["sections"]) == 75_000
+    assert [
+        line for section in plan["sections"] for line in section["lines"]
+    ] == [
+        "Pio pio, eccoci qua!",
+        "Splash splash, salta anche tu!",
+        "Arcobaleno con Nuvibù!",
+    ]
+    assert result.path == output
+    assert result.metadata["song_id"] == "song-structured"
+
+
+def test_composition_plan_keeps_short_sections_positive():
+    plan = build_music_v2_composition_plan(
+        lyrics="[Intro]\nCiao!\n\n[Ritornello]\nCanta con me!",
+        duration_seconds=15,
+        bpm=92,
+    )
+
+    assert sum(section["duration_ms"] for section in plan["sections"]) == 15_000
+    assert all(section["duration_ms"] > 0 for section in plan["sections"])
+
+
+def test_composition_plan_rejects_too_many_sections_for_duration():
+    lyrics = "\n\n".join(f"[Part {index}]\nCiao" for index in range(16))
+
+    with pytest.raises(ValueError, match="too many sections"):
+        build_music_v2_composition_plan(
+            lyrics=lyrics,
+            duration_seconds=15,
+            bpm=92,
+        )
