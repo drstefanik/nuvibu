@@ -15,14 +15,14 @@
   <div class="field-grid four">
     <label>Età minima<input type="number" name="age_min_months" value="9" min="0" max="48"></label>
     <label>Età massima<input type="number" name="age_max_months" value="48" min="1" max="60"></label>
-    <label>Durata sec<input type="number" name="duration_seconds" value="24" min="15" max="{{ settings.max_episode_seconds }}"></label>
+    <label>Durata sec<input type="number" name="duration_seconds" value="75" min="30" max="{{ settings.max_episode_seconds }}"></label>
     <label>BPM<input type="number" name="bpm" value="112" min="60" max="135"></label>
   </div>
   <div class="field-grid two">
     <label>Ritmo visivo<select name="visual_pacing"><option value="gentle" selected>Dolce: scene da circa 8 sec</option><option value="medium">Medio: scene da circa 6 sec</option><option value="energetic">Energico: scene da circa 5 sec</option></select></label>
     <label>Lingua<select name="language"><option value="it">Italiano</option><option value="en">English</option></select></label>
   </div>
-  <div class="notice"><strong>Standard Nuvibù:</strong> character reference bloccata, musica e testo originali, volto coerente, thumbnail leggibile da mobile e revisione umana integrale prima dell'upload.</div>
+  <div class="notice"><strong>Standard Nuvibù:</strong> 75 secondi è il formato consigliato. Character reference bloccata, testo organizzato per sezioni, musica originale, storyboard sincronizzato alle parole, volto coerente e revisione umana integrale prima dell'upload.</div>
   <div class="form-actions"><a class="button" href="/">Annulla</a><button class="button button-primary" type="submit">Crea episodio</button></div>
 </form>
 {% endblock %}
