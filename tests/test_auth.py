@@ -157,6 +157,94 @@ def test_production_login_cookie_is_secure(tmp_path: Path, monkeypatch):
         assert "SameSite=lax" in response.headers["set-cookie"]
 
 
+def test_cloud_run_https_origin_survives_internal_http_proxy(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        monkeypatch.setattr(main_module.settings, "app_env", "production")
+        monkeypatch.setattr(
+            main_module.settings,
+            "app_base_url",
+            "https://nuvibu-web-va66lw5csa-uc.a.run.app",
+        )
+        response = client.post(
+            "http://nuvibu-web-va66lw5csa-uc.a.run.app/login",
+            data={
+                "username": "stefano",
+                "password": "a-different-long-password",
+                "next": "/",
+            },
+            headers={
+                "origin": "https://nuvibu-web-va66lw5csa-uc.a.run.app",
+                "sec-fetch-site": "same-origin",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/"
+
+
+def test_cloud_run_proxy_fix_still_rejects_cross_site_form(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        monkeypatch.setattr(main_module.settings, "app_env", "production")
+        monkeypatch.setattr(
+            main_module.settings,
+            "app_base_url",
+            "https://nuvibu-web-va66lw5csa-uc.a.run.app",
+        )
+        response = client.post(
+            "http://nuvibu-web-va66lw5csa-uc.a.run.app/login",
+            data={
+                "username": "stefano",
+                "password": "a-different-long-password",
+                "next": "/",
+            },
+            headers={
+                "origin": "https://attacker.example",
+                "sec-fetch-site": "cross-site",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Cross-site request rejected"}
+
+
+def test_cloud_run_https_host_origin_is_allowed_without_fetch_metadata(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        monkeypatch.setattr(main_module.settings, "app_env", "production")
+        monkeypatch.setattr(
+            main_module.settings,
+            "app_base_url",
+            "https://nuvibu-web-va66lw5csa-uc.a.run.app",
+        )
+        response = client.post(
+            "http://nuvibu-web-168551345173.us-central1.run.app/login",
+            data={
+                "username": "stefano",
+                "password": "a-different-long-password",
+                "next": "/",
+            },
+            headers={
+                "origin": (
+                    "https://nuvibu-web-168551345173."
+                    "us-central1.run.app"
+                ),
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+
+
 def test_session_token_expires_and_rotates_with_password():
     token = create_session_token(
         secret_key="session-secret",

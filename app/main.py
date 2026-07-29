@@ -131,6 +131,24 @@ def canonical_console_url(request: Request) -> str | None:
     return target
 
 
+def allowed_browser_origins(request: Request) -> set[str]:
+    """Return browser-visible origins accepted for unsafe requests.
+
+    Cloud Run terminates TLS before forwarding the request to Uvicorn, so the
+    ASGI request can report ``http`` even though the browser used ``https``.
+    Keep the comparison host-bound while accepting that production proxy
+    boundary.
+    """
+
+    allowed = {
+        str(request.base_url).rstrip("/"),
+        settings.app_base_url.rstrip("/"),
+    }
+    if settings.app_env == "production" and request.url.netloc:
+        allowed.add(f"https://{request.url.netloc}")
+    return allowed
+
+
 @app.middleware("http")
 async def console_security(request: Request, call_next):
     canonical_url = canonical_console_url(request)
@@ -138,24 +156,27 @@ async def console_security(request: Request, call_next):
         return secure_response(RedirectResponse(canonical_url, status_code=308))
 
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
-        if request.headers.get("sec-fetch-site", "").lower() == "cross-site":
+        fetch_site = request.headers.get("sec-fetch-site", "").lower()
+        if fetch_site == "cross-site":
             return secure_response(
                 JSONResponse(
                     {"detail": "Cross-site request rejected"},
                     status_code=403,
                 )
             )
+        browser_proves_same_origin = fetch_site == "same-origin"
         origin = request.headers.get("origin")
-        allowed_origins = {
-            str(request.base_url).rstrip("/"),
-            settings.app_base_url.rstrip("/"),
-        }
-        if origin and origin.rstrip("/") not in allowed_origins:
+        allowed_origins = allowed_browser_origins(request)
+        if (
+            origin
+            and not browser_proves_same_origin
+            and origin.rstrip("/") not in allowed_origins
+        ):
             return secure_response(
                 JSONResponse({"detail": "Origin rejected"}, status_code=403)
             )
         referer = request.headers.get("referer")
-        if not origin and referer:
+        if not browser_proves_same_origin and not origin and referer:
             parsed = urlsplit(referer)
             referer_origin = f"{parsed.scheme}://{parsed.netloc}"
             if referer_origin.rstrip("/") not in allowed_origins:
@@ -166,7 +187,12 @@ async def console_security(request: Request, call_next):
         is_browser_form = content_type.startswith(
             ("application/x-www-form-urlencoded", "multipart/form-data")
         )
-        if is_browser_form and not origin and not referer:
+        if (
+            is_browser_form
+            and not browser_proves_same_origin
+            and not origin
+            and not referer
+        ):
             return secure_response(
                 JSONResponse(
                     {"detail": "Same-origin form proof required"},
