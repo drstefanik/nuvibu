@@ -1,16 +1,16 @@
 {% extends "base.html" %}
 {% block title %}Nuovo episodio{% endblock %}
 {% block content %}
-<section class="narrow-heading"><p class="eyebrow">NUOVO BRIEF</p><h1>Una promessa visiva forte.</h1><p>Il soggetto deve essere riconoscibile su smartphone, il primo evento deve arrivare subito e ogni scena deve aggiungere un'azione, un personaggio o una trasformazione.</p></section>
+<section class="narrow-heading"><p class="eyebrow">NUOVO BRIEF • EMMA &amp; FRIENDS</p><h1>Una nuova avventura di Emma.</h1><p>Emma è sempre la protagonista. Il primo evento deve arrivare subito e ogni scena deve aggiungere un’azione, un amico o una trasformazione.</p></section>
 <form class="form-card" action="/episodes" method="post">
   <div class="field-grid two">
     <label>Titolo di lavoro<input name="title" value="Pulcini Arcobaleno" required></label>
     <label>Format<select name="theme"><option value="colori e trasformazioni">Colori e trasformazioni</option><option value="animali e versi">Animali e versi</option><option value="baby dance">Baby dance</option><option value="cucù e sorpresa">Cucù e sorpresa</option><option value="storia musicale">Storia musicale</option><option value="nanna">Nanna</option></select></label>
   </div>
-  <label>Hook<input name="hook" value="Sette pulcini saltano in pozze magiche e cambiano colore" required></label>
+  <label>Hook<input name="hook" value="Emma guida sette pulcini tra pozze magiche che cambiano colore" required></label>
   <div class="field-grid two top-gap">
     <label>Parole, colori o oggetti <small>separati da virgola</small><input name="target_words" value="arcobaleno"></label>
-    <label>Personaggi<input name="featured_characters" value="Nuvibù, Pulcini Arcobaleno"></label>
+    <label>Personaggi <small>Emma viene sempre aggiunta e bloccata come protagonista</small><input name="featured_characters" value="Emma, Nuvi la nuvola, Pulcini Arcobaleno"></label>
   </div>
   <div class="field-grid four">
     <label>Età minima<input type="number" name="age_min_months" value="9" min="0" max="48"></label>
@@ -22,7 +22,7 @@
     <label>Ritmo visivo<select name="visual_pacing"><option value="gentle" selected>Dolce: scene da circa 8 sec</option><option value="medium">Medio: scene da circa 6 sec</option><option value="energetic">Energico: scene da circa 5 sec</option></select></label>
     <label>Lingua<select name="language"><option value="it">Italiano</option><option value="en">English</option></select></label>
   </div>
-  <div class="notice"><strong>Standard Nuvibù:</strong> 75 secondi è il formato consigliato. Character reference bloccata, testo organizzato per sezioni, musica originale, storyboard sincronizzato alle parole, volto coerente e revisione umana integrale prima dell'upload.</div>
+  <div class="notice"><strong>Standard Nuvibù — Emma &amp; Friends:</strong> Emma compare in ogni scena con reference ufficiale bloccata. 75 secondi è il formato consigliato; testo per sezioni, musica originale, storyboard sincronizzato e revisione umana integrale prima dell’upload.</div>
   <div class="form-actions"><a class="button" href="/">Annulla</a><button class="button button-primary" type="submit">Crea episodio</button></div>
 </form>
 {% endblock %}

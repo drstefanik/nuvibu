@@ -8,6 +8,33 @@ from ..models import Episode
 
 
 SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
+EMMA_VISUAL_GUARD = (
+    "Emma is the recurring main character and must be clearly visible for the "
+    "entire scene, leading the primary action. Keep her identical to the "
+    "approved Emma reference: nine-month-old baby proportions, large "
+    "grey-green eyes, round rosy cheeks, warm light skin, thick dark "
+    "chestnut-brown hair with one high playful ponytail tied in pastel pink, "
+    "sky-blue T-shirt with the exact lowercase white word 'nuvibu', "
+    "butter-yellow shorts and pale-pink soft shoes. Nuvibù is the name of the "
+    "platform and channel, not a character. The small plush white cloud is "
+    "Emma's secondary friend and must never replace, obscure or visually "
+    "dominate her. "
+)
+
+
+def featured_characters(episode: Episode) -> list[str]:
+    """Return the on-screen cast with Emma locked in first position."""
+
+    supporting: list[str] = []
+    for raw_name in episode.featured_characters or []:
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        if name.casefold() in {"emma", "nuvibù", "nuvibu"}:
+            continue
+        if name not in supporting:
+            supporting.append(name)
+    return ["Emma", *supporting]
 
 
 def lyric_sections(lyrics: str) -> list[tuple[str, list[str]]]:
@@ -60,14 +87,14 @@ def _rainbow_chicks_lyrics(duration_seconds: int) -> str:
         "Salta nella pozza: splash, splash, splash!\n"
         "Ogni piuma cambia in un flash.\n"
         "Rosso, giallo, verde e blu,\n"
-        "balla con i pulcini e con Nuvibù!"
+        "balla con i pulcini insieme ad Emma!"
     )
     verse_one = (
         "[Strofa 1]\n"
         "Rosso fa un saltino, giallo gira già,\n"
         "verde apre le ali, blu li seguirà.\n"
         "Uno, due, tre, guarda su:\n"
-        "quattro nuovi amici con Nuvibù!"
+        "quattro nuovi amici giocano con Emma!"
     )
     verse_two = (
         "[Strofa 2]\n"
@@ -88,7 +115,7 @@ def _rainbow_chicks_lyrics(duration_seconds: int) -> str:
         "Salta nella pozza: splash, splash, splash!\n"
         "Sette piume brillano in un flash.\n"
         "Rosso, giallo, verde e blu,\n"
-        "arcobaleno insieme a Nuvibù!"
+        "arcobaleno insieme ad Emma, sempre più!"
     )
     if duration_seconds <= 45:
         return "\n\n".join([intro, chorus, finale])
@@ -121,9 +148,9 @@ def generate_lyrics(episode: Episode) -> str:
 
     if episode.language == "en":
         refrain = (
-            "Nuvibù, Nuvibù, one, two, three,\n"
+            "Emma, Emma, one, two, three,\n"
             "clap your hands and dance with me.\n"
-            "Nuvibù, Nuvibù, turn around,\n"
+            "Emma, Emma, turn around,\n"
             "a little surprise is coming now!"
         )
         verses = []
@@ -145,9 +172,9 @@ def generate_lyrics(episode: Episode) -> str:
         return "\n\n".join(sections)
 
     refrain = (
-        "Nuvibù, Nuvibù, uno, due e tre,\n"
+        "Emma, Emma, uno, due e tre,\n"
         "batti le manine insieme a me.\n"
-        "Nuvibù, Nuvibù, gira un po',\n"
+        "Emma, Emma, gira un po',\n"
         "una nuova sorpresa arriverà!"
     )
     verses: list[str] = []
@@ -198,14 +225,13 @@ def _scene_prompt(
     lyric_cue: str,
     shot: str,
 ) -> str:
-    characters = ", ".join(episode.featured_characters or ["Nuvibù"])
+    characters = ", ".join(featured_characters(episode))
     return (
         "Original premium preschool 3D animation, 16:9, rich commercial YouTube quality. "
         f"Episode story: {episode.hook}. Theme: {episode.theme}. "
         f"Characters on model: {characters}. Sung lyric cue: '{lyric_cue}'. "
         f"Main action: {action}. Feature the concept '{word}'. Shot: {shot}. "
-        "Keep Nuvibù identical to the approved character reference: fluffy white cloud body, swirl tuft, "
-        "large glossy blue-violet eyes, rosy cheeks, joyful mouth, lavender feet, tiny rounded hands and rainbow chest emblem. "
+        f"{EMMA_VISUAL_GUARD}"
         "Preserve the exact cast count, colors, scale and wardrobe from the previous scene. "
         "Use plush materials, cinematic soft lighting, vivid saturated colors, expressive faces, depth, sparkles and a detailed "
         "but organized environment. Create one unmistakable focal action, strong foreground/background separation and readable motion "
@@ -232,16 +258,16 @@ def generate_storyboard(episode: Episode) -> list[dict[str, Any]]:
     lyrics = lyric_sections(episode.lyrics_text or generate_lyrics(episode))
     sung_lines = [line for _name, lines in lyrics for line in lines]
     actions = [
-        "Open immediately: Nuvibù parts two soft clouds and reveals the full cast to camera",
-        "Show the story problem clearly, then let the cast notice the first magical clue",
-        "The first character performs one simple action on the beat and triggers a transformation",
-        "Two characters repeat the action with a new color or object while Nuvibù reacts",
-        "The whole cast performs the signature chorus move in a clean semicircle",
-        "Push the story forward with a larger transformation that changes the environment",
-        "Use a playful call-and-response between Nuvibù and the featured friends",
-        "Repeat the signature move with a fresh visual reward and stronger color contrast",
-        "Reveal the completed transformation in one wide, readable hero shot",
-        "Finish with the cast facing camera, waving and holding the final rainbow pose",
+        "Open immediately on Emma's face as she parts two soft clouds and reveals her friends to camera",
+        "Emma shows the story problem clearly, then notices the first magical clue with her friends",
+        "Emma performs one simple action on the beat and triggers a transformation",
+        "Two friends repeat Emma's action with a new color or object while she reacts",
+        "Emma leads the whole cast in the signature chorus move in a clean semicircle",
+        "Emma pushes the story forward with a larger transformation that changes the environment",
+        "Use a playful call-and-response between Emma and the featured friends",
+        "Emma repeats the signature move with a fresh visual reward and stronger color contrast",
+        "Reveal Emma and the completed transformation in one wide, readable hero shot",
+        "Finish with Emma centred, her friends waving and everyone holding the final rainbow pose",
     ]
     shots = [
         "wide establishing shot with a gentle push-in",
@@ -299,9 +325,9 @@ def generate_storyboard(episode: Episode) -> list[dict[str, Any]]:
 def publish_metadata(episode: Episode) -> tuple[str, str, list[str]]:
     title = f"{episode.title} | Canzone per bambini"
     description = (
-        f"{episode.hook}. Una canzone originale di Nuvibù con colori, musica e personaggi da cantare insieme.\n\n"
+        f"{episode.hook}. Una canzone originale di Nuvibù – Emma & Friends, con colori, musica e personaggi da cantare insieme.\n\n"
         f"Tema: {episode.theme}\nParole chiave: {', '.join(episode.target_words)}\n\n"
-        "Testo, musica, personaggi e animazioni originali creati per il canale Nuvibù."
+        "Testo, musica, personaggi e animazioni originali creati per il canale Nuvibù. Emma è la protagonista di ogni avventura."
     )
     tags = [
         "canzoni per bambini",
@@ -310,6 +336,8 @@ def publish_metadata(episode: Episode) -> tuple[str, str, list[str]]:
         "impara i colori",
         "animali per bambini",
         "Nuvibù",
+        "Emma and Friends",
+        "Emma e i suoi amici",
         episode.theme,
     ]
     return title[:100], description, tags[:12]

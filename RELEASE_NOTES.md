@@ -1,13 +1,17 @@
-# Nuvibù Studio 0.2.0
+# Nuvibù Studio 0.3.0
 
-Data: 28 luglio 2026
+Data: 29 luglio 2026
 
 ## Aggiornamenti
 
-- sostituita la precedente identità geometrica con la mascotte 3D Nuvibù;
-- aggiunti key art, avatar, banner e due concept thumbnail premium;
-- aggiornata la Character Bible con caratteristiche visive immutabili;
-- aggiornati i prompt per scene più ricche, dinamiche e commercialmente competitive;
+- Nuvibù definito come nome della piattaforma e del canale;
+- introdotta **Emma & Friends**, con Emma protagonista obbligatoria di ogni scena;
+- aggiunta la reference ufficiale di Emma ricavata dalle fotografie approvate;
+- mantenuta la nuvola Nuvi come spalla visivamente secondaria;
+- rigenerati key art, avatar e banner YouTube nella nuova gerarchia;
+- aggiornata la Character Bible con volto, ciuffo, proporzioni e T-shirt `nuvibu` immutabili;
+- aggiornati i prompt Veo e la mapping delle reference: Emma, amici, mondo;
+- preservata la compatibilità con i vecchi ruoli reference `nuvibu` e `cast`;
 - la modalità mock usa concept approvati invece di facce geometriche;
 - rinnovata la dashboard con l'identità Nuvibù;
 - aggiunto workflow CI GitHub;

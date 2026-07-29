@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import Settings
 from app.database import Base
 from app.models import Episode, MetricSnapshot
+from app.schemas import EpisodeCreate
 from app.services.growth import calculate_growth_score
 from app.services.pipeline import PipelineService, slugify
 from app.services.prompts import generate_lyrics, generate_storyboard, lyric_sections
@@ -16,14 +17,14 @@ from app.services.safety import review_text
 
 def make_episode(duration: int = 16) -> Episode:
     return Episode(
-        title="Cucù con Nuvibù",
-        working_slug="cucu-con-nuvibu",
+        title="Cucù con Emma",
+        working_slug="cucu-con-emma",
         age_min_months=6,
         age_max_months=24,
         theme="cucù e sorpresa",
         hook="Due oggetti compaiono lentamente",
         target_words=["stella", "luna"],
-        featured_characters=["Nuvibù"],
+        featured_characters=["Emma", "Nuvi la nuvola"],
         duration_seconds=duration,
         bpm=90,
         visual_pacing="gentle",
@@ -33,6 +34,17 @@ def make_episode(duration: int = 16) -> Episode:
 
 def test_slugify_handles_accents_and_symbols():
     assert slugify("Cucù! È qui?") == "cucu-e-qui"
+
+
+def test_episode_brief_always_locks_emma_in_first_position():
+    payload = EpisodeCreate(
+        title="I pulcini colorati",
+        theme="colori",
+        hook="Sette pulcini scoprono una pozza",
+        featured_characters=["Nuvibù", "Pulcini", "Emma"],
+    )
+
+    assert payload.featured_characters == ["Emma", "Pulcini"]
 
 
 def test_storyboard_covers_duration_without_fast_scene():
@@ -45,6 +57,8 @@ def test_storyboard_covers_duration_without_fast_scene():
     assert all(scene["lyric_cue"] for scene in scenes)
     assert all(scene["lyric_cue"] in episode.lyrics_text for scene in scenes)
     assert "Episode story:" in scenes[0]["prompt"]
+    assert all("Emma is the recurring main character" in scene["prompt"] for scene in scenes)
+    assert all("Nuvibù is the name of the platform" in scene["prompt"] for scene in scenes)
 
 
 def test_rainbow_chicks_lyrics_are_coherent_and_duration_aware():
@@ -53,7 +67,7 @@ def test_rainbow_chicks_lyrics_are_coherent_and_duration_aware():
     episode.theme = "colori e trasformazioni"
     episode.hook = "Sette pulcini saltano in pozze magiche e cambiano colore"
     episode.target_words = ["arcobaleno"]
-    episode.featured_characters = ["Nuvibù", "Pulcini Arcobaleno"]
+    episode.featured_characters = ["Emma", "Nuvi la nuvola", "Pulcini Arcobaleno"]
     episode.bpm = 112
 
     lyrics = generate_lyrics(episode)
@@ -62,13 +76,13 @@ def test_rainbow_chicks_lyrics_are_coherent_and_duration_aware():
     assert len(sections) == 6
     assert "Sette pulcini, eccoli qua!" in lyrics
     assert "Arcobaleno sorride" not in lyrics
-    assert "arcobaleno insieme a Nuvibù!" in lyrics
+    assert "arcobaleno insieme ad Emma" in lyrics
     assert all(lines for _name, lines in sections)
 
 
 def test_safety_blocks_risky_terms():
     assert review_text("una scena con rapid cuts")
-    assert not review_text("Nuvibù saluta piano")
+    assert not review_text("Emma saluta piano")
 
 
 def test_growth_score_is_cautious_with_small_sample():

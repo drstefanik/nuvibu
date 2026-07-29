@@ -10,11 +10,29 @@ class EpisodeCreate(BaseModel):
     age_min_months: int = Field(default=6, ge=0, le=48)
     age_max_months: int = Field(default=24, ge=1, le=60)
     target_words: list[str] = Field(default_factory=list, max_length=12)
-    featured_characters: list[str] = Field(default_factory=lambda: ["Nuvibù"], max_length=6)
+    featured_characters: list[str] = Field(
+        default_factory=lambda: ["Emma", "Nuvi la nuvola"],
+        max_length=6,
+    )
     duration_seconds: int = Field(default=24, ge=15, le=600)
     bpm: int = Field(default=92, ge=60, le=135)
     visual_pacing: str = Field(default="gentle", pattern=r"^(gentle|medium|energetic)$")
     language: str = Field(default="it", pattern=r"^(it|en)$")
+
+    @field_validator("featured_characters", mode="before")
+    @classmethod
+    def lock_emma_as_protagonist(cls, value):
+        """Nuvibù is the brand; Emma is always the first human character."""
+
+        names = value if isinstance(value, list) else []
+        supporting: list[str] = []
+        for raw_name in names:
+            name = str(raw_name).strip()
+            if not name or name.casefold() in {"emma", "nuvibù", "nuvibu"}:
+                continue
+            if name not in supporting:
+                supporting.append(name)
+        return ["Emma", *supporting[:5]]
 
     @field_validator("age_max_months")
     @classmethod

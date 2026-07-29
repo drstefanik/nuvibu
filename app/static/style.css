@@ -26,6 +26,9 @@
 .reference-upload-form label{display:flex;flex-direction:column}
 .reference-upload-form label small{display:block;min-height:34px;margin-top:4px;line-height:1.35}
 .reference-upload-form input{margin-top:10px;padding:10px}
+.reference-locked{min-height:94px;display:flex;flex-direction:column;justify-content:center;padding:14px;border:1px solid #cfe8de;border-radius:13px;background:#f2faf6}
+.reference-locked strong{font-size:13px;color:#155f49}
+.reference-locked small{display:block;margin-top:5px;color:var(--muted);font-size:12px;line-height:1.35}
 .reference-upload-form .button{grid-column:1/-1;justify-self:end;min-width:220px}
 .legacy-reference{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,360px);gap:18px;align-items:center;margin-top:18px;padding:16px;border:1px solid #dcd4ef;border-radius:16px;background:#f8f4ff}
 .legacy-reference p:not(.eyebrow){margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.5}

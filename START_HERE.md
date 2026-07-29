@@ -1,6 +1,6 @@
 # Avvio rapido
 
-Questo repository contiene **Nuvibù Studio**, la console standalone del canale YouTube Nuvibù.
+Questo repository contiene **Nuvibù Studio**, la console standalone del canale YouTube **Nuvibù – Emma & Friends**.
 
 ## 1. Prova locale senza crediti
 
@@ -29,7 +29,8 @@ Le preview mock usano concept di qualità ma non contengono vera animazione dei 
 Compilare `.env` con provider musicali e video e avviare il worker. Creare un
 test di 20–30 secondi con una sola parola target: prima revisionare e approvare
 testo e storyboard gratuiti, poi confermare separatamente i costi di musica e
-render. Caricare la reference 16:9 definitiva prima delle scene. Solo dopo
+render. Emma è già caricata come reference ufficiale; prima delle scene vanno
+aggiunte le immagini degli amici e del mondo dell’episodio. Solo dopo
 l'approvazione di voce, movimento e consistenza si estende il render
 all'episodio intero.
 

@@ -540,7 +540,7 @@ def validate_production_stage(
                 status_code=409,
                 detail=(
                     "Upload the complete approved reference pack "
-                    "(Nuvibù, seven chicks and world) before rendering"
+                    "(official Emma, episode friends and world) before rendering"
                 ),
             )
         if has_qc:
@@ -665,7 +665,8 @@ def new_episode(request: Request):
 @app.post("/episodes")
 def create_episode_form(
     title: str = Form(...), theme: str = Form(...), hook: str = Form(...),
-    target_words: str = Form(""), featured_characters: str = Form("Nuvibù"),
+    target_words: str = Form(""),
+    featured_characters: str = Form("Emma, Nuvi la nuvola"),
     age_min_months: int = Form(6), age_max_months: int = Form(24),
     duration_seconds: int = Form(24), bpm: int = Form(92),
     visual_pacing: str = Form("gentle"), language: str = Form("it"),
@@ -781,6 +782,7 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
             "selected_music": selected_music,
             "can_regenerate_music": service.can_regenerate_music(episode),
             "has_reference": service.reference_pack_complete(episode),
+            "reference_pack_mutable": service.reference_pack_mutable(episode),
             "reference_assets": reference_assets,
             "legacy_reference": legacy_reference,
             "reference_role_order": REFERENCE_ROLE_ORDER,
@@ -976,16 +978,14 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 def upload_reference_pack(
     episode_id: str,
     existing_role: str = Form(""),
-    nuvibu_file: UploadFile | None = File(None),
-    cast_file: UploadFile | None = File(None),
+    friends_file: UploadFile | None = File(None),
     world_file: UploadFile | None = File(None),
     db: Session = Depends(get_db),
 ):
     episode = get_episode_or_404(db, episode_id)
     service = PipelineService(db, settings)
     uploads = {
-        "nuvibu": nuvibu_file,
-        "cast": cast_file,
+        "friends": friends_file,
         "world": world_file,
     }
     allowed_types = {"image/png", "image/jpeg", "image/webp"}
@@ -995,20 +995,23 @@ def upload_reference_pack(
             service.explicit_reference_role(asset): Path(asset.path)
             for asset in service.reference_pack_assets(episode)
         }
+        # Emma is a locked global series asset. Never ask the editor to find
+        # or re-upload her for every episode, and override the retired cloud
+        # hero reference from pre–Emma & Friends episodes.
+        sources["emma"] = service.official_emma_reference()
         legacy_reference = service.legacy_reference_asset(episode)
         if legacy_reference is not None:
-            if existing_role not in REFERENCE_ROLE_ORDER:
+            if existing_role not in {"friends", "world"}:
                 raise HTTPException(
                     status_code=400,
                     detail=(
                         "Assign the previously uploaded reference to "
-                        "Nuvibù, seven chicks or world"
+                        "the episode friends or world"
                     ),
                 )
             sources[existing_role] = Path(legacy_reference.path)
 
-        for role in REFERENCE_ROLE_ORDER:
-            upload = uploads[role]
+        for role, upload in uploads.items():
             if upload is None or not upload.filename:
                 continue
             if upload.content_type not in allowed_types:

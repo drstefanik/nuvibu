@@ -45,9 +45,9 @@ def test_reference_pack_upload_requires_and_displays_all_three_slots(
             data={
                 "title": "Reference pack",
                 "theme": "colori",
-                "hook": "Sette pulcini con Nuvibù",
+                "hook": "Emma gioca con sette pulcini",
                 "target_words": "rosso, giallo, verde",
-                "featured_characters": "Nuvibù, pulcini",
+                "featured_characters": "Emma, Nuvi la nuvola, pulcini",
                 "age_min_months": "6",
                 "age_max_months": "24",
                 "duration_seconds": "75",
@@ -63,8 +63,7 @@ def test_reference_pack_upload_requires_and_displays_all_three_slots(
         uploaded = client.post(
             f"{episode_url}/reference",
             files={
-                "nuvibu_file": ("nuvibu.png", _png_bytes("white"), "image/png"),
-                "cast_file": ("cast.png", _png_bytes("red"), "image/png"),
+                "friends_file": ("friends.png", _png_bytes("red"), "image/png"),
                 "world_file": ("world.png", _png_bytes("green"), "image/png"),
             },
             headers={"origin": "http://testserver"},
@@ -75,9 +74,9 @@ def test_reference_pack_upload_requires_and_displays_all_three_slots(
         detail = client.get(episode_url)
         assert detail.status_code == 200
         assert "3/3 completo" in detail.text
-        assert "Reference Nuvibù" in detail.text
-        assert "Reference Sette pulcini" in detail.text
-        assert "Reference Mondo" in detail.text
+        assert "Reference ufficiale Emma" in detail.text
+        assert "Reference Amici dell’episodio" in detail.text
+        assert "Reference Mondo dell’episodio" in detail.text
 
 
 def test_failed_dispatch_can_be_retried_from_episode_page(

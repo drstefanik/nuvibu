@@ -1,36 +1,33 @@
 {
   "working_brand": "Nuvibù",
-  "status": "premium visual direction approved; final production model, handle and trademark clearance still pending",
+  "series": "Emma & Friends",
+  "status": "Emma visual identity approved from family-supplied references; final production rig, handle and trademark clearance still pending",
   "character": {
-    "name": "Nuvibù",
-    "role": "joyful cloud guide and recurring hero",
-    "silhouette": "compact plush cloud body with five rounded lobes, one curled tuft, tiny rounded hands and short lavender feet",
+    "name": "Emma",
+    "role": "recurring main protagonist and emotional point of view in every song and episode",
+    "age_lock": "approximately nine months old",
+    "silhouette": "recognisable baby proportions with a large round head, compact body, thick chestnut hair and one high playful ponytail/top sprout",
     "immutable_features": [
-      "soft white plush cloud body",
-      "single curled tuft centered on top",
-      "large glossy blue-violet eyes with two clear catchlights",
-      "short lavender eyebrows",
-      "round rosy cheeks",
-      "joyful open smile with a small pink tongue and no visible teeth",
-      "two tiny rounded hands",
-      "two short lavender feet",
-      "small rainbow-and-stars emblem on the lower right side of the body"
+      "large grey-green eyes with clear catchlights",
+      "round rosy cheeks and warm light skin",
+      "thick dark chestnut-brown hair",
+      "one high playful ponytail/top sprout tied with a pastel-pink hair tie",
+      "soft sky-blue short-sleeve T-shirt",
+      "exact lowercase white word nuvibu printed once across the T-shirt chest",
+      "butter-yellow toddler shorts",
+      "pale-pink soft shoes",
+      "recognisable baby face and age-appropriate proportions"
     ],
     "approved_palette": {
-      "body": "#FFFDF7",
-      "eyes_deep": "#17143E",
-      "eyes_blue": "#315BD6",
-      "eyes_violet": "#734ED9",
-      "brows_and_feet": "#7653C9",
-      "cheeks": "#FF8FA3",
-      "rainbow_red": "#FF5F75",
-      "rainbow_orange": "#FFA23C",
-      "rainbow_yellow": "#FFD94E",
-      "rainbow_green": "#73D85A",
-      "rainbow_blue": "#4AB9F4"
+      "shirt_sky_blue": "#69B9EA",
+      "shorts_butter_yellow": "#F4C85A",
+      "shoes_blush_pink": "#F3A5B9",
+      "hair_chestnut": "#73452E",
+      "eyes_grey_green": "#4D5B49",
+      "skin_warm_light": "#FFD1B8"
     },
     "approved_expressions": [
-      "big joyful welcome",
+      "joyful welcome",
       "playful surprise",
       "curious anticipation",
       "gentle laugh",
@@ -40,41 +37,53 @@
     "approved_actions": [
       "wave with one hand",
       "clap once or twice",
-      "small rhythmic bounce",
+      "small supported rhythmic bounce",
       "peek from behind a cloud or prop",
       "lead a simple group dance",
       "point to a color, animal or object",
       "land in a clear celebratory pose"
     ],
+    "scene_rule": "Emma must be visible in every scene and lead the main action; supporting characters may never replace, obscure or visually dominate her",
     "forbidden": [
-      "missing or extra limbs",
-      "human fingers with realistic anatomy",
-      "sharp teeth",
-      "asymmetrical or drifting eye design",
-      "different tuft shape",
-      "different chest emblem",
-      "clothing or hats unless explicitly approved for a special episode",
-      "realistic human skin",
+      "missing or extra limbs or fingers",
+      "older-child or adult proportions",
+      "different eye color, face shape, hair color or top-sprout silhouette",
+      "different default wardrobe",
+      "misspelled, duplicated or replaced nuvibu shirt word",
+      "pacifier in production scenes unless explicitly required by the episode",
+      "heavy makeup or doll-like plastic face",
       "dark horror lighting",
-      "brand logos",
-      "text embedded in generated scenes",
-      "flat minimalist smiley-face rendering",
-      "generic clip-art rendering"
+      "third-party brand logos",
+      "text embedded in generated scenes except the locked nuvibu shirt word",
+      "flat minimalist or generic clip-art rendering"
+    ]
+  },
+  "supporting_character": {
+    "name": "Nuvi",
+    "role": "small recurring plush cloud friend and secondary companion",
+    "hierarchy": "always smaller and visually secondary to Emma",
+    "immutable_features": [
+      "soft white plush cloud body",
+      "single curled tuft centered on top",
+      "large glossy blue-violet eyes",
+      "round rosy cheeks",
+      "tiny rounded hands and short lavender feet",
+      "small rainbow-and-stars emblem"
     ]
   },
   "rendering_rules": {
-    "style": "premium polished 3D preschool animation with plush materials, soft cinematic lighting and strong mobile readability",
-    "detail": "rich and specific, never empty; one clear focal action with organized supporting details",
-    "color": "vivid, saturated and joyful while preserving clean separation between characters and background",
-    "consistency": "every scene must use the approved character reference or a locked model/LoRA/3D rig"
+    "style": "premium polished 3D preschool animation with tactile soft materials, cinematic lighting and strong mobile readability",
+    "detail": "rich and specific, never empty; one clear focal action led by Emma with organized supporting details",
+    "color": "vivid, joyful and warm while preserving clean separation between characters and background",
+    "consistency": "every scene must use the approved Emma reference as image 1; image 2 is the episode friend cast and image 3 is the empty episode world"
   },
   "camera_rules": {
     "shot_length_seconds_min": 3,
     "shot_length_seconds_preferred": 5,
     "cuts": "clean rhythmic cuts, motivated transitions and occasional smooth push-ins",
     "movement": "lively but readable; no random camera shake, strobe or aggressive whip-pan",
-    "subject_occupancy": "main character or action should occupy 40–75% of the frame",
-    "first_hook": "a face, reveal or transformation must be visible within the first 2 seconds"
+    "subject_occupancy": "Emma or the action she leads should occupy 40–75% of the frame",
+    "first_hook": "Emma's face, gesture or discovery must be visible within the first 2 seconds"
   },
   "audio_rules": {
     "bpm_range": [92, 124],

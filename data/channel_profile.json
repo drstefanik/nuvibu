@@ -1,17 +1,17 @@
 {
-  "working_name": "Nuvibù – Canzoni e Avventure per Bambini",
-  "working_handle_preferences": ["@Nuvibu", "@NuvibuKids", "@NuvibuCanzoni"],
+  "working_name": "Nuvibù – Emma & Friends",
+  "working_handle_preferences": ["@Nuvibu", "@NuvibuKids", "@NuvibuEmma"],
   "clearance_status": "Handle, dominio e marchio devono essere verificati prima del lancio pubblico.",
-  "positioning": "Canzoni originali e piccoli cartoni 3D ad alta riconoscibilità, con personaggi ricorrenti, colori, animali, trasformazioni e baby dance.",
+  "positioning": "Canzoni originali e piccoli cartoni 3D con Emma come protagonista fissa, la sua nuvola e un mondo ricorrente di amici, colori, animali, trasformazioni e baby dance.",
   "primary_audience": "famiglie con bambini da circa 9 mesi a 4 anni",
   "secondary_audience": "genitori, caregiver, nidi e scuole dell'infanzia",
-  "channel_description": "Benvenuti nel mondo di Nuvibù: canzoni originali, pulcini colorati, animali, arcobaleni, cucù e piccole avventure da cantare insieme. Nuovi personaggi, grandi sorrisi e una sorpresa in ogni episodio.",
+  "channel_description": "Benvenuti in Nuvibù, il mondo di Emma & Friends: canzoni originali, pulcini colorati, animali, arcobaleni, cucù e piccole avventure da cantare insieme. Emma è al centro di ogni episodio, sempre accompagnata dalla sua nuvola e da nuovi amici.",
   "playlists": [
     "Colori e trasformazioni",
     "Animali e versi",
-    "Baby Dance con Nuvibù",
+    "Baby Dance con Emma",
     "Cucù e sorprese",
-    "Nanna con Nuvibù"
+    "Nanna con Emma"
   ],
   "publishing": {
     "long_form": "due episodi alla settimana dopo il batch iniziale",
@@ -23,7 +23,8 @@
     "hook visivo entro 2 secondi",
     "titolo e thumbnail comprensibili a dimensione mobile",
     "un'azione centrale chiarissima per scena",
-    "personaggi ricorrenti e silhouette bloccate",
+    "Emma protagonista in ogni scena con reference ufficiale bloccata",
+    "amici ricorrenti e silhouette bloccate",
     "musica e testi originali",
     "ricchezza visiva organizzata, mai sfondi vuoti",
     "revisione umana prima di ogni upload",

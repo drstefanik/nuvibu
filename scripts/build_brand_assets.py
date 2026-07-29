@@ -69,7 +69,7 @@ def main() -> None:
 
     fp = font_path()
     title_font = ImageFont.truetype(str(fp), 150)
-    subtitle_font = ImageFont.truetype(str(fp), 47)
+    subtitle_font = ImageFont.truetype(str(fp), 62)
     detail_font = ImageFont.truetype(str(fp), 30)
     text_x = safe_x + 500
     draw.text(
@@ -81,20 +81,20 @@ def main() -> None:
         stroke_fill=(255, 255, 255, 255),
     )
     draw.text(
-        (text_x + 5, safe_y + 226),
-        "CANZONI E AVVENTURE PER BAMBINI",
+        (text_x + 5, safe_y + 216),
+        "EMMA & FRIENDS",
         font=subtitle_font,
         fill=(52, 48, 88, 255),
     )
     draw.text(
-        (text_x + 5, safe_y + 296),
-        "COLORI  •  ANIMALI  •  MUSICA  •  SORPRESE",
+        (text_x + 5, safe_y + 304),
+        "CANZONI  •  AVVENTURE  •  AMICI",
         font=detail_font,
         fill=(112, 88, 153, 255),
     )
     canvas.convert("RGB").save(BRAND / "nuvibu-youtube-banner-2560x1440.png", quality=94)
 
-    print("Generated avatar, app icon and YouTube banner from approved key art.")
+    print("Generated Emma-led avatar, app icon and YouTube banner.")
 
 
 if __name__ == "__main__":

@@ -144,9 +144,18 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
     class CountingVideoProvider:
         def __init__(self):
             self.calls = 0
+            self.prompts: list[str] = []
 
-        def generate(self, *, output_path: Path, duration_seconds: int, **_kwargs):
+        def generate(
+            self,
+            *,
+            output_path: Path,
+            duration_seconds: int,
+            prompt: str,
+            **_kwargs,
+        ):
             self.calls += 1
+            self.prompts.append(prompt)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"video")
             return VideoResult(
@@ -163,6 +172,9 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
         provider = CountingVideoProvider()
         service._video_provider = provider
         service.generate_storyboard(episode)
+        for scene in episode.storyboard_json:
+            scene["prompt"] = "Legacy cloud-led storyboard prompt"
+        db.commit()
 
         service.generate_scenes(episode)
         first_call_count = provider.calls
@@ -170,6 +182,14 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
 
         assert first_call_count == len(episode.storyboard_json)
         assert provider.calls == first_call_count
+        assert all(
+            "Emma is the recurring main character" in prompt
+            for prompt in provider.prompts
+        )
+        assert all(
+            "Nuvibù is the name of the platform" in prompt
+            for prompt in provider.prompts
+        )
 
 
 def test_stale_running_job_is_failed_and_replaced(tmp_path: Path):

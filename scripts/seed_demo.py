@@ -26,14 +26,18 @@ def main() -> None:
         episode = db.scalar(select(Episode).where(Episode.working_slug == "pulcini-arcobaleno-pilota"))
         if episode is None:
             episode = Episode(
-                title="Pulcini Arcobaleno – Pilota",
+                title="Emma e i Pulcini Arcobaleno – Pilota",
                 working_slug="pulcini-arcobaleno-pilota",
                 age_min_months=9,
                 age_max_months=48,
                 theme="colori e trasformazioni",
-                hook="Sette pulcini saltano in pozze magiche e cambiano colore",
+                hook="Emma guida sette pulcini tra pozze magiche che cambiano colore",
                 target_words=["rosso", "giallo", "blu", "verde", "rosa", "viola", "bianco"],
-                featured_characters=["Nuvibù", "Pulcini Arcobaleno"],
+                featured_characters=[
+                    "Emma",
+                    "Nuvi la nuvola",
+                    "Pulcini Arcobaleno",
+                ],
                 duration_seconds=32,
                 bpm=112,
                 visual_pacing="energetic",
