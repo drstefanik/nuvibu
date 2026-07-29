@@ -9,7 +9,7 @@ class EpisodeCreate(BaseModel):
     hook: str = Field(min_length=3, max_length=220)
     age_min_months: int = Field(default=6, ge=0, le=48)
     age_max_months: int = Field(default=24, ge=1, le=60)
-    target_words: list[str] = Field(default_factory=list, max_length=12)
+    target_words: list[str] = Field(default_factory=list, max_length=24)
     featured_characters: list[str] = Field(
         default_factory=lambda: ["Emma", "Nuvi la nuvola"],
         max_length=6,
@@ -18,6 +18,23 @@ class EpisodeCreate(BaseModel):
     bpm: int = Field(default=92, ge=60, le=135)
     visual_pacing: str = Field(default="gentle", pattern=r"^(gentle|medium|energetic)$")
     language: str = Field(default="it", pattern=r"^(it|en)$")
+
+    @field_validator("target_words", mode="before")
+    @classmethod
+    def normalize_target_words(cls, value):
+        """Keep useful prompt vocabulary without duplicate or blank entries."""
+
+        words = value if isinstance(value, list) else []
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for raw_word in words:
+            word = str(raw_word).strip()
+            key = word.casefold()
+            if not word or key in seen:
+                continue
+            seen.add(key)
+            normalized.append(word)
+        return normalized[:24]
 
     @field_validator("featured_characters", mode="before")
     @classmethod
