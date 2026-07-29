@@ -47,14 +47,17 @@ def build_music_v2_composition_plan(
 
     sections = _parse_lyric_sections(lyrics)
     total_ms = duration_seconds * 1000
-    if len(sections) > total_ms // 1000:
+    if len(sections) > 30:
+        raise ValueError("Music v2 supports at most 30 composition chunks")
+    minimum_chunk_ms = 3000
+    maximum_chunk_ms = 120000
+    if len(sections) * minimum_chunk_ms > total_ms:
         raise ValueError(
             "The lyric has too many sections for the requested song duration"
         )
     # Give every section a minimum phrase while distributing the remainder by
     # sung-line count. The final correction makes the total exact.
-    minimum_ms = min(3000, total_ms // len(sections))
-    remaining_ms = total_ms - minimum_ms * len(sections)
+    remaining_ms = total_ms - minimum_chunk_ms * len(sections)
     total_lines = sum(len(lines) for _name, lines in sections)
     durations: list[int] = []
     assigned = 0
@@ -63,51 +66,65 @@ def build_music_v2_composition_plan(
             duration_ms = total_ms - assigned
         else:
             share = remaining_ms * len(lines) // total_lines
-            duration_ms = minimum_ms + share
+            duration_ms = minimum_chunk_ms + share
+        if duration_ms > maximum_chunk_ms:
+            raise ValueError(
+                "A Music v2 composition chunk cannot exceed 120 seconds"
+            )
         durations.append(duration_ms)
         assigned += duration_ms
 
-    plan_sections = []
+    global_styles = [
+        f"{bpm} BPM",
+        "original modern preschool pop",
+        "bright major key",
+        "toy percussion and glockenspiel",
+        "polished warm production",
+    ]
+    global_negative_styles = [
+        "dark",
+        "aggressive",
+        "frightening",
+        "rapid tempo changes",
+        "imitation of an existing song or artist",
+    ]
+    chunks = []
     for (name, lines), duration_ms in zip(sections, durations, strict=True):
-        local_styles = [
-            "clear warm lead vocal",
-            "highly intelligible approved lyrics",
+        positive_styles = global_styles + [
+            "clear warm Italian lead vocal",
+            "highly intelligible Italian lyrics",
             "simple melody for very young children",
         ]
         if "ritornello" in name.casefold() or "chorus" in name.casefold():
-            local_styles.extend(
+            positive_styles.extend(
                 ["memorable singalong hook", "gentle hand claps"]
             )
-        plan_sections.append(
+        chunks.append(
             {
-                "section_name": name,
+                "text": f"[{name}]\n" + "\n".join(lines),
                 "duration_ms": duration_ms,
-                "lines": lines,
-                "positive_local_styles": local_styles,
-                "negative_local_styles": [
+                "positive_styles": positive_styles,
+                "negative_styles": global_negative_styles
+                + [
                     "spoken narration",
-                    "unapproved words",
+                    "additional or improvised lyrics",
                     "dense vocal runs",
                 ],
+                "context_adherence": "high",
             }
         )
-    return {
-        "positive_global_styles": [
-            f"{bpm} BPM",
-            "original modern preschool pop",
-            "bright major key",
-            "toy percussion and glockenspiel",
-            "polished warm production",
-        ],
-        "negative_global_styles": [
-            "dark",
-            "aggressive",
-            "frightening",
-            "rapid tempo changes",
-            "imitation of an existing song or artist",
-        ],
-        "sections": plan_sections,
-    }
+    return {"chunks": chunks}
+
+
+def _elevenlabs_error_detail(response: httpx.Response) -> str:
+    """Expose actionable provider diagnostics without request headers or secrets."""
+
+    try:
+        body = response.json()
+        detail = json.dumps(body, ensure_ascii=False, sort_keys=True)
+    except (ValueError, json.JSONDecodeError):
+        detail = response.text.strip()
+    return (detail or "no response body")[:2000]
 
 
 def music_request_fingerprint(
@@ -241,6 +258,10 @@ class ElevenLabsMusicProvider:
         assert response is not None
         if 400 <= response.status_code < 500:
             receipt_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"ElevenLabs rejected the music request ({response.status_code}): "
+                f"{_elevenlabs_error_detail(response)}"
+            )
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
         if not content_type.startswith("audio/") or len(response.content) < 1024:
