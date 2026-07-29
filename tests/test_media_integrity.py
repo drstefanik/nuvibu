@@ -165,11 +165,11 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
         db.commit()
         sources = {
             "world": tmp_path / "world.png",
-            "nuvibu": tmp_path / "nuvibu.png",
-            "cast": tmp_path / "cast.png",
+            "emma": tmp_path / "emma.png",
+            "friends": tmp_path / "friends.png",
         }
-        write_png(sources["nuvibu"], "white")
-        write_png(sources["cast"], "red")
+        write_png(sources["emma"], "white")
+        write_png(sources["friends"], "red")
         write_png(sources["world"], "green")
 
         service = PipelineService(db, settings)
@@ -179,35 +179,80 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
         assert [
             asset.metadata_json["reference_role"]
             for asset in assets
-        ] == ["nuvibu", "cast", "world"]
+        ] == ["emma", "friends", "world"]
         assert [asset.variant for asset in assets] == [1, 2, 3]
-        assert [path.name.split("-")[1] for path in service.reference_images(episode)] == [
-            "nuvibu",
-            "cast",
-            "world",
-        ]
+        reference_images = service.reference_images(episode)
+        assert reference_images[0].name == "emma-character-sheet.png"
+        assert [
+            path.name.split("-")[1]
+            for path in reference_images[1:]
+        ] == ["friends", "world"]
         assert all(asset.width == 1280 for asset in assets)
         assert all(asset.height == 720 for asset in assets)
 
 
-def test_legacy_single_reference_can_be_adopted_as_cast(tmp_path: Path):
+def test_legacy_cloud_pack_is_mapped_to_official_emma_reference(
+    tmp_path: Path,
+):
     Session = make_session(tmp_path)
     settings = make_settings(tmp_path)
     with Session() as db:
         episode = make_episode(75)
         db.add(episode)
         db.commit()
-        legacy_cast = tmp_path / "legacy-cast.png"
-        nuvibu = tmp_path / "nuvibu.png"
+        old_cloud = tmp_path / "old-cloud.png"
+        old_friends = tmp_path / "old-friends.png"
+        old_world = tmp_path / "old-world.png"
+        write_png(old_cloud, "white")
+        write_png(old_friends, "red")
+        write_png(old_world, "green")
+        for variant, (role, path) in enumerate(
+            [
+                ("nuvibu", old_cloud),
+                ("cast", old_friends),
+                ("world", old_world),
+            ],
+            start=1,
+        ):
+            db.add(
+                Asset(
+                    episode=episode,
+                    kind=AssetKind.CHARACTER_REFERENCE,
+                    provider="pre-emma-flow",
+                    path=str(path),
+                    mime_type="image/png",
+                    variant=variant,
+                    selected=True,
+                    metadata_json={"reference_role": role},
+                )
+            )
+        db.commit()
+
+        service = PipelineService(db, settings)
+        assert service.reference_pack_complete(episode) is True
+        references = service.reference_images(episode)
+        assert references[0].name == "emma-character-sheet.png"
+        assert references[1:] == [old_friends, old_world]
+
+
+def test_legacy_single_reference_can_be_adopted_as_friends(tmp_path: Path):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        legacy_friends = tmp_path / "legacy-friends.png"
+        emma = tmp_path / "emma.png"
         world = tmp_path / "world.png"
-        write_png(legacy_cast, "red")
-        write_png(nuvibu, "white")
+        write_png(legacy_friends, "red")
+        write_png(emma, "white")
         write_png(world, "green")
         legacy_asset = Asset(
             episode=episode,
             kind=AssetKind.CHARACTER_REFERENCE,
             provider="old-single-reference-flow",
-            path=str(legacy_cast),
+            path=str(legacy_friends),
             mime_type="image/png",
             selected=True,
         )
@@ -219,8 +264,8 @@ def test_legacy_single_reference_can_be_adopted_as_cast(tmp_path: Path):
         assets = service.save_reference_pack(
             episode,
             {
-                "nuvibu": nuvibu,
-                "cast": legacy_cast,
+                "emma": emma,
+                "friends": legacy_friends,
                 "world": world,
             },
         )
@@ -229,8 +274,8 @@ def test_legacy_single_reference_can_be_adopted_as_cast(tmp_path: Path):
         assert [
             asset.metadata_json["reference_role"]
             for asset in assets
-        ] == ["nuvibu", "cast", "world"]
-        assert not legacy_cast.exists()
+        ] == ["emma", "friends", "world"]
+        assert not legacy_friends.exists()
         assert all(Path(asset.path).exists() for asset in assets)
 
 

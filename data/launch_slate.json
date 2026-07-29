@@ -1,14 +1,14 @@
 [
-  {"week": 1, "format": "colors", "title": "Pulcini Arcobaleno", "hook": "sette pulcini saltano in pozze di colore e cambiano piumaggio", "variable_tested": "color transformation plus ensemble cast"},
-  {"week": 1, "format": "animals", "title": "La Fattoria Fa Festa", "hook": "Nuvibù incontra mucca, cane, gatto, papera e gallo in una baby dance", "variable_tested": "animal sounds with recurring guide"},
-  {"week": 2, "format": "peekaboo", "title": "Cucù Dietro la Nuvola", "hook": "quattro personaggi compaiono da nuvole di forma diversa", "variable_tested": "peekaboo reveal"},
-  {"week": 2, "format": "colors", "title": "La Magia dei Colori", "hook": "barattoli sorridenti lanciano archi di pittura che si mescolano", "variable_tested": "paint transformation"},
-  {"week": 3, "format": "movement", "title": "Batti, Salta, Gira!", "hook": "tre gesti semplici guidati da Nuvibù e dai pulcini", "variable_tested": "repeatable choreography"},
-  {"week": 3, "format": "vehicles", "title": "Il Trenino Arcobaleno", "hook": "ogni vagone porta un colore, un animale e un piccolo ritornello", "variable_tested": "sequence and anticipation"},
-  {"week": 4, "format": "animals", "title": "I Versi del Bosco", "hook": "volpe, gufo, orsetto e rana rispondono a Nuvibù", "variable_tested": "new animal world"},
-  {"week": 4, "format": "counting", "title": "Dieci Palloncini in Festa", "hook": "i palloncini appaiono uno alla volta e volano nel ritornello", "variable_tested": "counting and cumulative cast"},
-  {"week": 5, "format": "peekaboo", "title": "Chi C'è Dentro l'Uovo?", "hook": "uova giganti colorate si aprono con una sorpresa diversa", "variable_tested": "container reveal"},
-  {"week": 5, "format": "routine", "title": "La Giornata di Nuvibù", "hook": "sveglia, pappa, gioco, bagnetto e nanna in cinque scene musicali", "variable_tested": "daily routine narrative"},
-  {"week": 6, "format": "music", "title": "L'Orchestra degli Animali", "hook": "ogni animale aggiunge uno strumento al ritornello finale", "variable_tested": "cumulative music arrangement"},
-  {"week": 6, "format": "bedtime", "title": "Buonanotte Piccole Stelle", "hook": "Nuvibù accompagna cinque stelline verso una luna morbida", "variable_tested": "calm audio-first format"}
+  {"week": 1, "format": "colors", "title": "Emma e i Pulcini Arcobaleno", "hook": "Emma guida sette pulcini che saltano in pozze di colore e cambiano piumaggio", "variable_tested": "color transformation plus ensemble cast"},
+  {"week": 1, "format": "animals", "title": "La Fattoria Fa Festa", "hook": "Emma incontra mucca, cane, gatto, papera e gallo in una baby dance", "variable_tested": "animal sounds with recurring guide"},
+  {"week": 2, "format": "peekaboo", "title": "Emma e il Cucù Dietro la Nuvola", "hook": "Emma e Nuvi scoprono quattro amici dietro nuvole di forma diversa", "variable_tested": "peekaboo reveal"},
+  {"week": 2, "format": "colors", "title": "Emma e la Magia dei Colori", "hook": "Emma mescola archi di pittura lanciati da barattoli sorridenti", "variable_tested": "paint transformation"},
+  {"week": 3, "format": "movement", "title": "Batti, Salta, Gira!", "hook": "Emma guida tre gesti semplici insieme ai pulcini", "variable_tested": "repeatable choreography"},
+  {"week": 3, "format": "vehicles", "title": "Emma e il Trenino Arcobaleno", "hook": "Emma scopre un colore, un animale e un piccolo ritornello in ogni vagone", "variable_tested": "sequence and anticipation"},
+  {"week": 4, "format": "animals", "title": "Emma e i Versi del Bosco", "hook": "volpe, gufo, orsetto e rana rispondono a Emma", "variable_tested": "new animal world"},
+  {"week": 4, "format": "counting", "title": "Emma e Dieci Palloncini", "hook": "Emma conta i palloncini che appaiono e volano nel ritornello", "variable_tested": "counting and cumulative cast"},
+  {"week": 5, "format": "peekaboo", "title": "Emma, Chi C'è Dentro l'Uovo?", "hook": "Emma apre uova giganti colorate e incontra una sorpresa diversa", "variable_tested": "container reveal"},
+  {"week": 5, "format": "routine", "title": "La Giornata di Emma", "hook": "sveglia, pappa, gioco, bagnetto e nanna in cinque scene musicali", "variable_tested": "daily routine narrative"},
+  {"week": 6, "format": "music", "title": "Emma e l'Orchestra degli Animali", "hook": "Emma invita ogni animale ad aggiungere uno strumento al ritornello finale", "variable_tested": "cumulative music arrangement"},
+  {"week": 6, "format": "bedtime", "title": "Emma e le Piccole Stelle", "hook": "Emma e Nuvi accompagnano cinque stelline verso una luna morbida", "variable_tested": "calm audio-first format"}
 ]

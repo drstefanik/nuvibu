@@ -2,11 +2,11 @@
 
 ## Posizionamento
 
-**Nuvibù – Canzoni e Avventure per Bambini** è un canale standalone di musica e piccoli cartoni 3D originali. Il nome è ancora di lavoro: handle, dominio e marchio vanno verificati prima della pubblicazione.
+**Nuvibù – Emma & Friends** è un canale standalone di musica e piccoli cartoni 3D originali. Emma è la protagonista fissa; Nuvi, la nuvola, e gli altri amici costruiscono il cast ricorrente. Handle, dominio e marchio vanno verificati prima della pubblicazione.
 
 La promessa editoriale è semplice:
 
-> Personaggi riconoscibili, canzoni facili da ricordare, grandi trasformazioni visive e una storia chiara in ogni episodio.
+> Emma in ogni canzone, amici riconoscibili, grandi trasformazioni visive e una storia chiara in ogni episodio.
 
 Il pubblico che sceglie il video è l'adulto. Il bambino deve capire il soggetto e l'azione in una frazione di secondo.
 
@@ -23,6 +23,7 @@ Non vengono pubblicati:
 
 Ogni episodio deve avere almeno:
 
+- Emma visibile e riconoscibile in ogni scena;
 - una thumbnail con titolo leggibile su smartphone;
 - una trasformazione, reveal o gesto forte entro i primi 2 secondi;
 - un ritornello riconoscibile entro i primi 20 secondi;

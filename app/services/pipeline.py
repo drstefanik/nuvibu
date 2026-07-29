@@ -26,18 +26,34 @@ from ..providers import get_music_provider, get_video_provider
 from ..providers.base import MusicProvider, MusicResult, VideoProvider, VideoResult
 from ..providers.elevenlabs import music_receipt_path, music_request_fingerprint
 from ..providers.veo import veo_price_per_second
-from .prompts import generate_lyrics, generate_storyboard, music_prompt, publish_metadata
+from .prompts import (
+    EMMA_VISUAL_GUARD,
+    generate_lyrics,
+    generate_storyboard,
+    music_prompt,
+    publish_metadata,
+)
 from .render import concatenate_scenes, create_thumbnail, make_vertical_short, mux_music
 from .safety import review_episode
 
 
 STEP_ORDER = ["lyrics", "storyboard", "music", "scenes", "render", "qc"]
-REFERENCE_ROLE_ORDER = ("nuvibu", "cast", "world")
+REFERENCE_ROLE_ORDER = ("emma", "friends", "world")
 REFERENCE_ROLE_LABELS = {
-    "nuvibu": "Nuvibù",
-    "cast": "Sette pulcini",
-    "world": "Mondo",
+    "emma": "Emma — reference ufficiale",
+    "friends": "Amici dell’episodio",
+    "world": "Mondo dell’episodio",
 }
+LEGACY_REFERENCE_ROLE_ALIASES = {
+    "nuvibu": "emma",
+    "cast": "friends",
+}
+OFFICIAL_EMMA_REFERENCE = (
+    Path(__file__).resolve().parents[2]
+    / "brand"
+    / "source"
+    / "emma-character-sheet.png"
+)
 REFERENCE_DEPENDENT_ASSET_KINDS = {
     AssetKind.VIDEO_SCENE,
     AssetKind.RENDER,
@@ -1317,7 +1333,16 @@ class PipelineService:
     @staticmethod
     def explicit_reference_role(asset: Asset) -> str | None:
         role = str((asset.metadata_json or {}).get("reference_role", ""))
+        role = LEGACY_REFERENCE_ROLE_ALIASES.get(role, role)
         return role if role in REFERENCE_ROLE_ORDER else None
+
+    @staticmethod
+    def official_emma_reference() -> Path:
+        if not OFFICIAL_EMMA_REFERENCE.is_file():
+            raise FileNotFoundError(
+                f"Official Emma reference missing: {OFFICIAL_EMMA_REFERENCE}"
+            )
+        return OFFICIAL_EMMA_REFERENCE
 
     def reference_pack_assets(self, episode: Episode) -> list[Asset]:
         selected = [
@@ -1356,11 +1381,19 @@ class PipelineService:
         )
 
     def reference_images(self, episode: Episode) -> list[Path]:
-        references = [
-            Path(asset.path)
+        assets = {
+            self.explicit_reference_role(asset): asset
             for asset in self.reference_pack_assets(episode)
-        ]
-        if references:
+        }
+        if assets:
+            references: list[Path] = []
+            for role in REFERENCE_ROLE_ORDER:
+                if role == "emma":
+                    references.append(self.official_emma_reference())
+                    continue
+                asset = assets.get(role)
+                if asset is not None:
+                    references.append(Path(asset.path))
             return references
         legacy = self.legacy_reference_asset(episode)
         return [Path(legacy.path)] if legacy is not None else []
@@ -1373,10 +1406,31 @@ class PipelineService:
         return roles == set(REFERENCE_ROLE_ORDER)
 
     def character_reference(self, episode: Episode) -> Path | None:
-        """Backward-compatible accessor for the primary Nuvibù reference."""
+        """Backward-compatible accessor for the primary Emma reference."""
 
         references = self.reference_images(episode)
         return references[0] if references else None
+
+    def reference_pack_mutable(self, episode: Episode) -> bool:
+        """Return whether the pack can still be changed without invalidation."""
+
+        if self.active_job(episode) is not None or episode.qc_json:
+            return False
+        dependent_asset = self.db.scalar(
+            select(Asset.id)
+            .where(
+                Asset.episode_id == episode.id,
+                Asset.kind.in_(REFERENCE_DEPENDENT_ASSET_KINDS),
+            )
+            .limit(1)
+        )
+        if dependent_asset is not None:
+            return False
+        scene_dir = self.settings.asset_dir / episode.id / "scenes"
+        if scene_dir.is_dir() and any(scene_dir.iterdir()):
+            return False
+        render_dir = self.settings.render_dir / episode.id
+        return not (render_dir.is_dir() and any(render_dir.iterdir()))
 
     def _lock_episode(self, episode: Episode) -> None:
         locked_id = self.db.scalar(
@@ -1706,7 +1760,7 @@ class PipelineService:
 
         return self._save_reference_sources(
             episode,
-            {"nuvibu": source},
+            {"emma": source},
         )[0]
 
     def generate_scenes(self, episode: Episode) -> None:
@@ -1774,15 +1828,22 @@ class PipelineService:
                         # can run for several minutes.
                         self.db.commit()
                         reference_context = (
-                            "\nReference mapping: image 1 is Nuvibù, image 2 is "
-                            "the exact seven-chick cast, and image 3 is the empty "
-                            "episode world. Preserve their identity, colors, "
-                            "materials and environment exactly."
+                            "\nReference mapping: image 1 is the official Emma "
+                            "character sheet, image 2 is the exact supporting "
+                            "friend cast, and image 3 is the empty episode world. "
+                            "Emma is the main protagonist in every shot. Preserve "
+                            "identities, colors, wardrobe, materials and "
+                            "environment exactly."
                             if len(references) == 3
                             else ""
                         )
                         result = self.video_provider.generate(
-                            prompt=scene["prompt"] + reference_context,
+                            prompt=(
+                                scene["prompt"]
+                                + "\nNon-negotiable series rule: "
+                                + EMMA_VISUAL_GUARD
+                                + reference_context
+                            ),
                             duration_seconds=int(scene["duration_seconds"]),
                             output_path=path,
                             seed=173 + index,

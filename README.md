@@ -4,7 +4,7 @@
 
 Console autonoma per progettare, produrre, revisionare e misurare **canzoni e cartoni originali per un canale YouTube made-for-kids**. Il progetto non è collegato a British Institutes o Digital Campus.
 
-L'identità pubblica di lavoro è **Nuvibù**. La direzione visiva corrente usa una mascotte 3D ricorrente, concept thumbnail ad alta densità e una Character Bible bloccata. Nome, handle e marchio devono comunque essere verificati prima del lancio pubblico.
+L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends**. Emma, cartoonizzata dalle reference familiari approvate, è la protagonista fissa di ogni episodio; la nuvola Nuvi è la sua spalla ricorrente. La Character Bible blocca volto, silhouette, outfit e gerarchia del cast. Nome, handle e marchio devono comunque essere verificati prima del lancio pubblico.
 
 ## Stato del progetto
 
@@ -34,7 +34,7 @@ L'identità pubblica di lavoro è **Nuvibù**. La direzione visiva corrente usa 
 
 - generazione musicale con la chiave del provider;
 - generazione video con il progetto Google effettivo;
-- consistenza del personaggio su un episodio completo;
+- consistenza di Emma e degli amici su un episodio completo;
 - OAuth, upload e Analytics del canale YouTube;
 - costi reali per episodio;
 - disponibilità legale del nome Nuvibù.
@@ -45,7 +45,9 @@ L'identità pubblica di lavoro è **Nuvibù**. La direzione visiva corrente usa 
 |---|---|
 | Avatar canale | `brand/nuvibu-avatar-800.png` |
 | Banner YouTube | `brand/nuvibu-youtube-banner-2560x1440.png` |
-| Key art mascotte | `brand/source/nuvibu-key-art.png` |
+| Key art Emma & Friends | `brand/source/nuvibu-key-art.png` |
+| Reference ufficiale Emma | `brand/source/emma-character-sheet.png` |
+| Reference Nuvi, la nuvola | `brand/source/nuvi-cloud-key-art.png` |
 | Concept “Pulcini Arcobaleno” | `brand/concepts/pulcini-arcobaleno.png` |
 | Concept “Cucù dietro la nuvola” | `brand/concepts/cucu-dietro-la-nuvola.png` |
 | Character Bible | `data/character_bible_template.json` |
@@ -63,9 +65,9 @@ Brief
   → storyboard
   → revisione e approvazione storyboard
   → conferma costo e musica
-  → reference personaggio approvata
+  → reference ufficiale Emma + amici + mondo
   → conferma costo e scene AI
-  → scene AI con character reference
+  → scene AI con Emma obbligatoria come image 1
   → video 16:9
   → Short 9:16 + thumbnail
   → QC automatico

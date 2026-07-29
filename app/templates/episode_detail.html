@@ -118,8 +118,8 @@
   {% elif not has_reference %}
   <div class="stage-copy">
     <p class="eyebrow">FASE 4 • CONTROLLO VISIVO</p>
-    <h2 id="next-stage-title">Carica le tre reference approvate</h2>
-    <p>Il video resta bloccato finché il pack Nuvibù, pulcini e mondo non è completo.</p>
+    <h2 id="next-stage-title">Completa le reference dell’episodio</h2>
+    <p>Emma è già bloccata come protagonista ufficiale. Carica soltanto i suoi amici e il mondo dell’episodio.</p>
   </div>
   <div class="stage-actions">
     <a class="button button-primary" href="#character-reference">Carica reference pack</a>
@@ -324,9 +324,9 @@
       <p class="eyebrow">COERENZA VISIVA</p>
       <h2>Reference pack</h2>
     </div>
-    {% if has_reference %}<span class="status status-approved">3/3 completo</span>{% else %}<span class="status">{{ reference_assets|length }}/3</span>{% endif %}
+    {% if has_reference %}<span class="status status-approved">3/3 completo</span>{% else %}<span class="status">{{ 1 + (1 if reference_assets.get('friends') else 0) + (1 if reference_assets.get('world') else 0) }}/3</span>{% endif %}
   </div>
-  <p class="muted">Veo riceverà, nello stesso ordine, Nuvibù, il cast esatto dei sette pulcini e il mondo dell’episodio. In questo modo preserva identità, colori e scenografia tra le scene.</p>
+  <p class="muted">Veo riceverà sempre, nello stesso ordine, Emma, gli amici selezionati e il mondo dell’episodio. Emma resta la protagonista di ogni scena; la nuvola e gli altri personaggi sono i suoi compagni.</p>
 
   {% if legacy_reference %}
   <article class="legacy-reference">
@@ -342,12 +342,14 @@
   <div class="reference-grid">
     {% for role in reference_role_order %}
     {% set asset = reference_assets.get(role) %}
-    <article class="reference-card{% if asset %} reference-card-ready{% endif %}">
+    <article class="reference-card{% if asset or role == 'emma' %} reference-card-ready{% endif %}">
       <div class="reference-card-heading">
         <strong>{{ loop.index }}. {{ reference_role_labels.get(role) }}</strong>
-        <span class="status{% if asset %} status-approved{% endif %}">{% if asset %}pronta{% else %}manca{% endif %}</span>
+        <span class="status{% if asset or role == 'emma' %} status-approved{% endif %}">{% if role == 'emma' %}ufficiale{% elif asset %}pronta{% else %}manca{% endif %}</span>
       </div>
-      {% if asset %}
+      {% if role == 'emma' %}
+      <img class="reference-preview" src="/static/emma-character-sheet.png" alt="Reference ufficiale Emma">
+      {% elif asset %}
       <img class="reference-preview" src="/assets/{{ asset.id }}" alt="Reference {{ reference_role_labels.get(role) }}">
       {% else %}
       <div class="reference-placeholder">16:9 • PNG, JPEG o WebP</div>
@@ -358,37 +360,36 @@
 
   {% if active_job %}
   <p class="locked-note">Il reference pack non può essere modificato mentre il worker è attivo.</p>
-  {% elif not has_reference and has_music and storyboard_approved %}
+  {% elif reference_pack_mutable and has_music and storyboard_approved %}
   <form class="reference-upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data">
     {% if legacy_reference %}
     <label class="existing-reference-role" for="existing-reference-role">L’immagine già caricata è
-      <small>Nel tuo episodio attuale seleziona “Sette pulcini”.</small>
+      <small>Assegnala agli amici oppure al mondo dell’episodio.</small>
       <select id="existing-reference-role" name="existing_role" required>
         <option value="">Scegli il ruolo</option>
-        <option value="nuvibu">Nuvibù</option>
-        <option value="cast">Sette pulcini</option>
-        <option value="world">Mondo</option>
+        <option value="friends">Amici dell’episodio</option>
+        <option value="world">Mondo dell’episodio</option>
       </select>
     </label>
     {% endif %}
-    <label for="nuvibu-reference-file">1. Nuvibù
-      <small>{% if reference_assets.get('nuvibu') %}Già presente; scegli un file solo per sostituirla{% else %}Personaggio singolo, corpo intero{% endif %}</small>
-      <input id="nuvibu-reference-file" type="file" name="nuvibu_file" accept="image/png,image/jpeg,image/webp"{% if not legacy_reference and not reference_assets.get('nuvibu') %} required{% endif %}>
-    </label>
-    <label for="cast-reference-file">2. Sette pulcini
-      <small>{% if reference_assets.get('cast') %}Già presente; scegli un file solo per sostituirla{% else %}Rosso, giallo, verde, blu, arancio, viola, rosa{% endif %}</small>
-      <input id="cast-reference-file" type="file" name="cast_file" accept="image/png,image/jpeg,image/webp"{% if not legacy_reference and not reference_assets.get('cast') %} required{% endif %}>
+    <div class="reference-locked">
+      <strong>1. Emma</strong>
+      <small>Reference ufficiale bloccata per tutta la serie</small>
+    </div>
+    <label for="friends-reference-file">2. Amici dell’episodio
+      <small>{% if reference_assets.get('friends') %}Già presenti; scegli un file solo per sostituirli{% else %}Tutto il cast secondario, completo e su un’unica immagine{% endif %}</small>
+      <input id="friends-reference-file" type="file" name="friends_file" accept="image/png,image/jpeg,image/webp"{% if not legacy_reference and not reference_assets.get('friends') %} required{% endif %}>
     </label>
     <label for="world-reference-file">3. Mondo
-      <small>{% if reference_assets.get('world') %}Già presente; scegli un file solo per sostituirla{% else %}Pozzanghere, prato, fiori e arcobaleno{% endif %}</small>
+      <small>{% if reference_assets.get('world') %}Già presente; scegli un file solo per sostituirlo{% else %}Scenografia vuota, senza personaggi{% endif %}</small>
       <input id="world-reference-file" type="file" name="world_file" accept="image/png,image/jpeg,image/webp"{% if not legacy_reference and not reference_assets.get('world') %} required{% endif %}>
     </label>
-    <button class="button button-primary" type="submit">{% if legacy_reference or reference_assets %}Completa reference pack{% else %}Carica tutte e tre{% endif %}</button>
+    <button class="button button-primary" type="submit">{% if has_reference %}Aggiorna reference pack{% else %}Completa reference pack{% endif %}</button>
   </form>
   {% elif not has_reference %}
   <p class="locked-note">Il caricamento si sblocca dopo l’approvazione dello storyboard e la generazione della musica.</p>
   {% else %}
-  <p class="locked-note">Il pack è bloccato per questo episodio. Dopo l’avvio di Veo non può essere sostituito, così media e costi restano tracciabili.</p>
+  <p class="locked-note">Il pack è bloccato perché la produzione video è già iniziata. Emma resta comunque la reference ufficiale inviata a Veo.</p>
   {% endif %}
 </section>
 

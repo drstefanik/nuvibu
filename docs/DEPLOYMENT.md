@@ -142,7 +142,7 @@ deploy.
    approvarlo.
 5. Confermare il costo musicale, accodare una sola variante e ascoltarla
    integralmente.
-6. Caricare la reference definitiva di Nuvibù.
+6. Verificare la reference ufficiale di Emma e caricare amici e mondo dell’episodio.
 7. Confermare il costo residuo e accodare una sola volta render e QC.
 8. Seguire il worker nella pagina episodio, quindi revisionare integralmente
    audio, video, Short, thumbnail e report.

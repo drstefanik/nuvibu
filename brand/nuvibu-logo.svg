@@ -1,13 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
-<title id="title">Nuvibù</title><desc id="desc">Logo di lavoro con mascotte nuvola sorridente</desc>
+<title id="title">Nuvibù — Emma &amp; Friends</title><desc id="desc">Wordmark del canale Nuvibù con Emma protagonista</desc>
 <rect width="1200" height="360" rx="64" fill="#EEF4FF"/>
-<g transform="translate(185 180)">
-  <circle cx="-72" cy="-20" r="86" fill="#fff"/><circle cx="0" cy="-72" r="104" fill="#fff"/><circle cx="78" cy="-18" r="86" fill="#fff"/><circle cx="0" cy="58" r="110" fill="#fff"/>
-  <circle r="124" fill="#fff" stroke="#7577FF" stroke-width="12"/>
-  <circle cx="-42" cy="-18" r="12" fill="#38415C"/><circle cx="42" cy="-18" r="12" fill="#38415C"/>
-  <path d="M-48 18 Q0 72 48 18" fill="none" stroke="#38415C" stroke-width="11" stroke-linecap="round"/>
-  <ellipse cx="-78" cy="28" rx="18" ry="11" fill="#FFBBC8"/><ellipse cx="78" cy="28" rx="18" ry="11" fill="#FFBBC8"/>
+<g transform="translate(175 184)">
+  <circle r="126" fill="#9EDCFF" stroke="#FFFFFF" stroke-width="14"/>
+  <circle cy="8" r="91" fill="#FFD1B8"/>
+  <path d="M-88-34 Q-70-124 0-118 Q82-116 91-27 Q48-68 1-63 Q-51-64-88-34" fill="#73452E"/>
+  <path d="M-10-104 Q-72-166-20-185 Q26-202 56-143 Q41-188 89-175 Q122-161 66-102" fill="#73452E"/>
+  <rect x="-9" y="-154" width="57" height="19" rx="10" fill="#FF9DB6"/>
+  <ellipse cx="-34" cy="-2" rx="18" ry="23" fill="#27352D"/>
+  <ellipse cx="34" cy="-2" rx="18" ry="23" fill="#27352D"/>
+  <circle cx="-29" cy="-9" r="6" fill="#FFFFFF"/><circle cx="39" cy="-9" r="6" fill="#FFFFFF"/>
+  <path d="M-35 35 Q0 70 35 35" fill="none" stroke="#A95056" stroke-width="9" stroke-linecap="round"/>
+  <rect x="-74" y="78" width="148" height="44" rx="22" fill="#69B9EA"/>
 </g>
-<text x="380" y="190" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="124" fill="#4549A7">NUVIBÙ</text>
-<text x="388" y="258" font-family="Arial,Helvetica,sans-serif" font-weight="700" font-size="34" letter-spacing="3" fill="#68708C">CANZONI PER PICCOLISSIMI</text>
+<text x="350" y="185" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="124" fill="#4549A7">NUVIBÙ</text>
+<text x="360" y="254" font-family="Arial,Helvetica,sans-serif" font-weight="800" font-size="38" letter-spacing="3" fill="#FF7098">EMMA &amp; FRIENDS</text>
 </svg>

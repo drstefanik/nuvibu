@@ -3,12 +3,12 @@
 {% block content %}
 <section class="hero">
   <div class="hero-copy">
-    <p class="eyebrow">CANALE YOUTUBE AUTONOMO</p>
-    <h1>Canzoni originali.<br>Cartoni che si fanno ricordare.</h1>
-    <p>Da un brief a canzone, storyboard, scene 3D, video 16:9, Short, thumbnail, controllo qualità e upload privato. Ogni episodio parte da un'identità visiva coerente e viene misurato sui dati reali.</p>
+    <p class="eyebrow">NUVIBÙ • EMMA &amp; FRIENDS</p>
+    <h1>Emma in ogni canzone.<br>Un mondo di amici.</h1>
+    <p>Da un brief a canzone, storyboard, scene 3D, video 16:9, Short, thumbnail, controllo qualità e upload privato. Emma è la protagonista fissa; la nuvola e il cast dell’episodio sono i suoi compagni d’avventura.</p>
     <a class="button button-primary" href="/episodes/new">Crea il prossimo episodio</a>
   </div>
-  <div class="hero-visual"><img src="/static/nuvibu-avatar.png" alt="Mascotte Nuvibù"></div>
+  <div class="hero-visual"><img src="/static/nuvibu-avatar.png" alt="Emma e la nuvola di Nuvibù"></div>
 </section>
 <section class="stats">
   <article><strong>{{ stats.episodes }}</strong><span>Episodi</span></article>
@@ -31,6 +31,6 @@
 {% endfor %}
 </section>
 {% else %}
-<section class="empty-state"><img class="empty-avatar" src="/static/nuvibu-avatar.png" alt="Nuvibù"><h3>Nessun episodio</h3><p>Crea il primo brief, approva testo e storyboard, poi avvia il render soltanto dopo aver controllato la stima di costo.</p><a class="button button-primary" href="/episodes/new">Crea il pilota</a></section>
+<section class="empty-state"><img class="empty-avatar" src="/static/nuvibu-avatar.png" alt="Emma e i suoi amici"><h3>Nessun episodio</h3><p>Crea la prossima avventura di Emma, approva testo e storyboard, poi avvia il render soltanto dopo aver controllato la stima di costo.</p><a class="button button-primary" href="/episodes/new">Crea il pilota</a></section>
 {% endif %}
 {% endblock %}
