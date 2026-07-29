@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
-from app.models import Asset, AssetKind, Episode, JobStatus
+from app.models import Asset, AssetKind, Episode, EpisodeStatus, JobStatus
 from app.providers.elevenlabs import music_receipt_path
 from app.services.pipeline import (
     BUDGET_ACTUAL_BASELINE_USD_KEY,
@@ -334,6 +334,131 @@ def test_cost_helpers_count_only_missing_provider_assets(
         )
         db.commit()
         assert service.estimate_remaining_cost(episode) == 1.6
+
+
+def test_music_regeneration_archives_old_asset_and_reserves_one_retry(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path, provider_mode="live")
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.generate_lyrics(episode)
+        service.generate_storyboard(episode)
+        service.approve_content(episode, "lyrics")
+        service.approve_content(episode, "storyboard")
+        music = settings.asset_dir / episode.id / "music-v1.mp3"
+        music.write_bytes(b"paid music")
+        old_asset = Asset(
+            episode=episode,
+            kind=AssetKind.MUSIC,
+            provider="elevenlabs-music",
+            path=str(music),
+            mime_type="audio/mpeg",
+            selected=True,
+            duration_seconds=75,
+            cost_usd=0.19,
+        )
+        db.add(old_asset)
+        episode.status = EpisodeStatus.MUSIC_READY
+        db.commit()
+
+        replacement_cost = service.estimate_music_regeneration_cost(episode)
+        job = service.enqueue(
+            episode,
+            "music",
+            estimated_incremental_cost=replacement_cost,
+            replace_existing_music=True,
+        )
+
+        db.refresh(old_asset)
+        db.refresh(episode)
+        assert replacement_cost == pytest.approx(0.19)
+        assert old_asset.selected is False
+        assert old_asset.metadata_json["invalidation_reason"] == (
+            "user_requested_regeneration"
+        )
+        invalidated_at = old_asset.metadata_json["invalidated_at"]
+        assert old_asset.cost_usd == pytest.approx(0.19)
+        assert music.exists()
+        assert episode.actual_cost_usd == pytest.approx(0.19)
+        assert episode.status == EpisodeStatus.STORYBOARD_READY
+        assert service.estimate_music_cost(episode) == pytest.approx(0.19)
+        assert job.payload_json["through_step"] == "music"
+        assert job.payload_json[BUDGET_RESERVED_USD_KEY] == pytest.approx(0.19)
+
+        duplicate = service.enqueue(
+            episode,
+            "music",
+            estimated_incremental_cost=replacement_cost,
+            replace_existing_music=True,
+        )
+        db.refresh(old_asset)
+        assert duplicate.id == job.id
+        assert old_asset.metadata_json["invalidated_at"] == invalidated_at
+
+
+def test_music_regeneration_is_blocked_after_video_production_starts(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path, provider_mode="live")
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.generate_lyrics(episode)
+        service.generate_storyboard(episode)
+        service.approve_content(episode, "lyrics")
+        service.approve_content(episode, "storyboard")
+        music = settings.asset_dir / episode.id / "music-v1.mp3"
+        music.write_bytes(b"paid music")
+        old_asset = Asset(
+            episode=episode,
+            kind=AssetKind.MUSIC,
+            provider="elevenlabs-music",
+            path=str(music),
+            mime_type="audio/mpeg",
+            selected=True,
+            duration_seconds=75,
+            cost_usd=0.19,
+        )
+        report = settings.asset_dir / episode.id / "qc.json"
+        report.write_text('{"passed": false}', encoding="utf-8")
+        db.add_all(
+            [
+                old_asset,
+                Asset(
+                    episode=episode,
+                    kind=AssetKind.REPORT,
+                    provider="qc",
+                    path=str(report),
+                    mime_type="application/json",
+                    selected=True,
+                ),
+            ]
+        )
+        db.commit()
+
+        with pytest.raises(
+            ReferenceChangeConflictError,
+            match="video production has started",
+        ):
+            service.enqueue(
+                episode,
+                "music",
+                estimated_incremental_cost=0.19,
+                replace_existing_music=True,
+            )
+
+        db.refresh(old_asset)
+        assert old_asset.selected is True
+        assert "invalidated_at" not in old_asset.metadata_json
+        assert service.active_job(episode) is None
 
 
 def test_episode_cap_includes_historical_paid_ledger_and_replacement(

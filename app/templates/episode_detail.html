@@ -179,6 +179,38 @@
 </div>
 {% endif %}
 
+{% if selected_music %}
+<section class="panel music-review-panel" aria-labelledby="music-review-title">
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">MUSICA</p>
+      <h2 id="music-review-title">Traccia corrente</h2>
+    </div>
+    <span class="status status-approved">pronta</span>
+  </div>
+  <p class="muted">Ascolta integralmente la traccia prima di autorizzare il video.</p>
+  <audio class="music-player" controls preload="metadata" src="/assets/{{ selected_music.id }}"></audio>
+
+  {% if can_regenerate_music %}
+  <form class="music-regeneration paid-stage" action="/episodes/{{ episode.id }}/music/regenerate" method="post">
+    <div>
+      <strong>La musica non ti convince?</strong>
+      <p>La versione attuale e il suo costo resteranno nel registro. Testo, storyboard e reference non cambieranno.</p>
+    </div>
+    <label class="confirm-check">
+      <input type="checkbox" name="confirm_cost" value="true" required>
+      <span>Confermo una nuova generazione, costo stimato <strong>${{ "%.2f"|format(music_regeneration_cost) }}</strong></span>
+    </label>
+    <button class="button button-primary" type="submit">Rigenera musica</button>
+  </form>
+  {% elif active_job %}
+  <p class="locked-note">La rigenerazione resta bloccata finché il worker attivo non termina.</p>
+  {% else %}
+  <p class="locked-note">La musica non può più essere sostituita dopo l’avvio della produzione video.</p>
+  {% endif %}
+</section>
+{% endif %}
+
 {% if settings.youtube_enabled and episode.status.value in ['approved', 'scheduled', 'published'] %}
 <section class="secondary-actions" aria-label="Azioni YouTube">
   {% if episode.status.value == 'approved' %}

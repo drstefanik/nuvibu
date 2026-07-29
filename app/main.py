@@ -417,6 +417,7 @@ def validate_production_stage(
     through_step: str,
     *,
     confirm_cost: bool,
+    replace_existing_music: bool = False,
 ) -> float:
     active_job = service.active_job(episode)
     if active_job is not None:
@@ -503,16 +504,25 @@ def validate_production_stage(
                 detail="Approve the current storyboard before generating music",
             )
         if has_music:
-            raise HTTPException(
-                status_code=409,
-                detail="Music already exists",
-            )
+            if not replace_existing_music:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Music already exists",
+                )
+            try:
+                service.validate_music_regeneration(episode)
+            except ReferenceChangeConflictError as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from exc
         if not confirm_cost:
             raise HTTPException(
                 status_code=400,
                 detail="Explicit music cost confirmation is required",
             )
-        incremental_cost = service.estimate_music_cost(episode)
+        incremental_cost = (
+            service.estimate_music_regeneration_cost(episode)
+            if replace_existing_music
+            else service.estimate_music_cost(episode)
+        )
     elif through_step == "qc":
         if not has_storyboard or not service.content_is_approved(
             episode,
@@ -553,7 +563,14 @@ def validate_production_stage(
         )
 
     try:
-        service.assert_budget(episode)
+        service.assert_budget(
+            episode,
+            additional_cost=(
+                incremental_cost
+                if replace_existing_music and has_music
+                else 0.0
+            ),
+        )
         service.assert_daily_budget(incremental_cost)
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -566,6 +583,7 @@ def enqueue_and_dispatch(
     through_step: str,
     *,
     confirm_cost: bool = False,
+    replace_existing_music: bool = False,
 ) -> Job:
     service = PipelineService(db, settings)
     estimated_incremental_cost: float | None = None
@@ -575,6 +593,7 @@ def enqueue_and_dispatch(
             episode,
             through_step,
             confirm_cost=confirm_cost,
+            replace_existing_music=replace_existing_music,
         )
         db.commit()
     try:
@@ -582,6 +601,7 @@ def enqueue_and_dispatch(
             episode,
             through_step,
             estimated_incremental_cost=estimated_incremental_cost,
+            replace_existing_music=replace_existing_music,
         )
     except ActiveJobError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -717,6 +737,10 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
         .order_by(Job.created_at.desc())
         .limit(5)
     ).all()
+    selected_music = service.selected_valid_asset(
+        episode,
+        AssetKind.MUSIC,
+    )
     return templates.TemplateResponse(
         request, "episode_detail.html",
         {
@@ -725,6 +749,9 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
             "jobs": jobs,
             "estimated_cost": estimated_cost,
             "music_estimated_cost": service.estimate_music_cost(episode),
+            "music_regeneration_cost": (
+                service.estimate_music_regeneration_cost(episode)
+            ),
             "remaining_estimated_cost": service.estimate_remaining_cost(episode),
             "active_job": active_job,
             "active_job_retryable": active_job_retryable,
@@ -745,6 +772,8 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
                 "storyboard",
             ),
             "has_music": service.has_valid_asset(episode, AssetKind.MUSIC),
+            "selected_music": selected_music,
+            "can_regenerate_music": service.can_regenerate_music(episode),
             "has_reference": service.has_valid_asset(
                 episode,
                 AssetKind.CHARACTER_REFERENCE,
@@ -786,6 +815,40 @@ def run_pipeline_form(
             episode.status = EpisodeStatus.FAILED
             db.commit()
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
+
+
+@app.post("/episodes/{episode_id}/music/regenerate")
+def regenerate_music_form(
+    episode_id: str,
+    confirm_cost: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    if not confirm_cost:
+        raise HTTPException(
+            status_code=400,
+            detail="Explicit music regeneration cost confirmation is required",
+        )
+    episode = get_episode_or_404(db, episode_id)
+    service = PipelineService(db, settings)
+    try:
+        if settings.app_env == "production":
+            enqueue_and_dispatch(
+                db,
+                episode,
+                "music",
+                confirm_cost=True,
+                replace_existing_music=True,
+            )
+        else:
+            service.prepare_music_regeneration(episode)
+            service.run_through(episode, "music")
+    except ActiveJobError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ReferenceChangeConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
 
 

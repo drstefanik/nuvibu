@@ -192,6 +192,22 @@ class PipelineService:
 
         return bool(self._valid_assets(episode, kind))
 
+    def selected_valid_asset(
+        self,
+        episode: Episode,
+        kind: AssetKind,
+    ) -> Asset | None:
+        """Return the newest selected usable asset for a media kind."""
+
+        return next(
+            (
+                asset
+                for asset in reversed(self._valid_assets(episode, kind))
+                if asset.selected
+            ),
+            None,
+        )
+
     def _discard_invalid_assets(self, episode: Episode, kind: AssetKind) -> None:
         invalid = [
             asset
@@ -200,12 +216,18 @@ class PipelineService:
         ]
         if not invalid:
             return
-        paid = [asset for asset in invalid if asset.cost_usd > 0]
-        free = [asset for asset in invalid if asset.cost_usd <= 0]
-        if paid:
+        preserved = [
+            asset
+            for asset in invalid
+            if asset.cost_usd > 0
+            or (asset.metadata_json or {}).get("invalidation_reason")
+            == "user_requested_regeneration"
+        ]
+        removable = [asset for asset in invalid if asset not in preserved]
+        if preserved:
             invalidated_at = datetime.now(timezone.utc).isoformat()
             with self._daily_budget_lock():
-                for asset in paid:
+                for asset in preserved:
                     metadata = dict(asset.metadata_json or {})
                     metadata.setdefault("invalidated_at", invalidated_at)
                     metadata.setdefault(
@@ -214,11 +236,11 @@ class PipelineService:
                     )
                     asset.metadata_json = metadata
                     asset.selected = False
-                for asset in free:
+                for asset in removable:
                     self.db.delete(asset)
                 self.db.commit()
         else:
-            for asset in free:
+            for asset in removable:
                 self.db.delete(asset)
             self.db.commit()
 
@@ -340,6 +362,91 @@ class PipelineService:
             2,
         )
 
+    def estimate_music_regeneration_cost(self, episode: Episode) -> float:
+        """Estimate a deliberate replacement of every configured music variant."""
+
+        if self.settings.provider_mode == "mock":
+            return 0.0
+        return round(
+            self.settings.max_music_variants
+            * (episode.duration_seconds / 60)
+            * 0.15,
+            2,
+        )
+
+    def validate_music_regeneration(self, episode: Episode) -> None:
+        if not self.content_is_approved(episode, "lyrics"):
+            raise ReferenceChangeConflictError(
+                "Approve the current lyrics before regenerating music"
+            )
+        if not self.content_is_approved(episode, "storyboard"):
+            raise ReferenceChangeConflictError(
+                "Approve the current storyboard before regenerating music"
+            )
+        if not self.has_valid_asset(episode, AssetKind.MUSIC):
+            raise ReferenceChangeConflictError(
+                "There is no current music asset to regenerate"
+            )
+        downstream_kinds = {
+            AssetKind.VIDEO_SCENE,
+            AssetKind.RENDER,
+            AssetKind.SHORT,
+            AssetKind.THUMBNAIL,
+            AssetKind.SUBTITLES,
+            AssetKind.REPORT,
+        }
+        downstream = [
+            kind.value
+            for kind in downstream_kinds
+            if self.has_valid_asset(episode, kind)
+        ]
+        if downstream or episode.qc_json:
+            details = ", ".join(sorted(downstream)) or "quality report"
+            raise ReferenceChangeConflictError(
+                "Cannot regenerate music after video production has started: "
+                f"{details}"
+            )
+
+    def can_regenerate_music(self, episode: Episode) -> bool:
+        try:
+            self.validate_music_regeneration(episode)
+        except ReferenceChangeConflictError:
+            return False
+        return self.active_job(episode) is None
+
+    def _invalidate_music_for_regeneration(self, episode: Episode) -> None:
+        """Archive current music in place so a new immutable output can be made."""
+
+        self.validate_music_regeneration(episode)
+        invalidated_at = datetime.now(timezone.utc).isoformat()
+        for asset in self._valid_assets(episode, AssetKind.MUSIC):
+            metadata = dict(asset.metadata_json or {})
+            metadata["invalidated_at"] = invalidated_at
+            metadata["invalidation_reason"] = "user_requested_regeneration"
+            asset.metadata_json = metadata
+            asset.selected = False
+        episode.status = EpisodeStatus.STORYBOARD_READY
+        self._update_actual_cost(episode)
+        self.db.flush()
+
+    def prepare_music_regeneration(self, episode: Episode) -> None:
+        """Prepare a synchronous/local music retry while preserving history."""
+
+        self._lock_episode(episode)
+        active = self.active_job(episode)
+        if active is not None:
+            self.db.rollback()
+            raise ActiveJobError(
+                f"Cannot regenerate music while job {active.id} "
+                f"is {active.status.value}"
+            )
+        try:
+            self._invalidate_music_for_regeneration(episode)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+
     def _estimate_video_cost(
         self,
         episode: Episode,
@@ -396,9 +503,18 @@ class PipelineService:
     def _video_price_per_second(self) -> float:
         return veo_price_per_second(self.settings.veo_backend, self.settings.veo_model)
 
-    def assert_budget(self, episode: Episode) -> None:
+    def assert_budget(
+        self,
+        episode: Episode,
+        *,
+        additional_cost: float = 0.0,
+    ) -> None:
         actual = max(0.0, self._episode_actual_cost(episode.id))
-        remaining = max(0.0, self.estimate_remaining_cost(episode))
+        remaining = max(
+            0.0,
+            self.estimate_remaining_cost(episode)
+            + max(0.0, float(additional_cost)),
+        )
         projected = actual + remaining
         episode.actual_cost_usd = actual
         episode.estimated_cost_usd = round(projected, 4)
@@ -1706,9 +1822,14 @@ class PipelineService:
         through_step: str = "qc",
         *,
         estimated_incremental_cost: float | None = None,
+        replace_existing_music: bool = False,
     ) -> Job:
         if through_step not in STEP_ORDER:
             raise ValueError(f"Unknown pipeline step: {through_step}")
+        if replace_existing_music and through_step != "music":
+            raise ValueError(
+                "Existing music can only be replaced by a music job"
+            )
         now = datetime.now(timezone.utc)
         job: Job | None = None
         try:
@@ -1722,6 +1843,11 @@ class PipelineService:
                     if estimated_incremental_cost is None
                     else max(0.0, float(estimated_incremental_cost))
                 )
+                if replace_existing_music:
+                    requested = max(
+                        requested,
+                        self.estimate_music_regeneration_cost(episode),
+                    )
                 active_jobs = self._expire_stale_jobs(
                     self._active_pipeline_jobs(),
                     now=now,
@@ -1774,6 +1900,13 @@ class PipelineService:
                     )
                     self.db.commit()
                     return existing
+
+                if replace_existing_music:
+                    self.assert_budget(
+                        episode,
+                        additional_cost=requested,
+                    )
+                    self._invalidate_music_for_regeneration(episode)
 
                 latest_job = self.db.scalar(
                     select(Job)

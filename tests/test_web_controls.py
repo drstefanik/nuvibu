@@ -170,3 +170,98 @@ def test_healthy_pending_dispatch_cannot_be_retried_early(
         assert duplicate.status_code == 409
         assert "not ready to be retried" in duplicate.json()["detail"]
         assert len(dispatch_calls) == 1
+
+
+def test_music_ready_page_can_regenerate_only_after_cost_confirmation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        created = client.post(
+            "/episodes",
+            data={
+                "title": "Musica da rifare",
+                "theme": "colori",
+                "hook": "Sette pulcini saltano nella pozza",
+                "target_words": "rosso, giallo, verde, blu",
+                "featured_characters": "Nuvibù, pulcini",
+                "age_min_months": "6",
+                "age_max_months": "24",
+                "duration_seconds": "15",
+                "bpm": "92",
+                "visual_pacing": "gentle",
+                "language": "it",
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        episode_url = created.headers["location"]
+        assert client.post(
+            f"{episode_url}/run",
+            data={"through_step": "lyrics"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+        assert client.post(
+            f"{episode_url}/lyrics/approve",
+            data={
+                "lyrics_text": (
+                    "[Intro]\nPio pio, eccoci qua!\n"
+                    "[Ritornello]\nSalta e canta con Nuvibù!"
+                )
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+        assert client.post(
+            f"{episode_url}/run",
+            data={"through_step": "storyboard"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+        assert client.post(
+            f"{episode_url}/storyboard/approve",
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+        assert client.post(
+            f"{episode_url}/run",
+            data={"through_step": "music"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+
+        detail = client.get(episode_url)
+        assert detail.status_code == 200
+        assert "Rigenera musica" in detail.text
+        assert "La versione attuale e il suo costo resteranno nel registro" in detail.text
+        assert "<audio" in detail.text
+
+        rejected = client.post(
+            f"{episode_url}/music/regenerate",
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert rejected.status_code == 400
+
+        regenerated = client.post(
+            f"{episode_url}/music/regenerate",
+            data={"confirm_cost": "true"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert regenerated.status_code == 303
+        assert len(
+            list(
+                (tmp_path / "storage" / "assets").glob(
+                    "*/music-v1*.mp3"
+                )
+            )
+        ) == 2

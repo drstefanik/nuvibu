@@ -12,6 +12,9 @@
 .stage-actions{display:flex;flex-direction:column;align-items:flex-end;gap:12px;margin:0}
 .stage-actions .button{min-width:190px}
 .paid-stage{padding:16px;border:1px solid #dcd4ef;border-radius:16px;background:#fff}
+.music-player{display:block;width:100%;margin:18px 0}
+.music-regeneration{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1fr) auto;gap:18px;align-items:center;margin-top:18px}
+.music-regeneration p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
 .confirm-check{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.45;cursor:pointer}
 .confirm-check input{width:19px;height:19px;flex:0 0 auto;margin:0;margin-top:1px;accent-color:var(--accent)}
 .confirm-check span{font-weight:600}
@@ -54,6 +57,7 @@
   .stage-card{padding:22px 19px;gap:20px}
   .stage-copy h2{font-size:24px}
   .paid-stage{padding:14px}
+  .music-regeneration{grid-template-columns:1fr}
   .panel-title{align-items:flex-start}
   .job-table-wrap{margin-left:-4px;margin-right:-4px}
   .upload-form{display:flex;flex-direction:column;align-items:stretch}
