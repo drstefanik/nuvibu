@@ -2,12 +2,112 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import time
 from pathlib import Path
 
 import httpx
 
 from .base import MusicResult
+
+
+SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
+
+
+def _parse_lyric_sections(lyrics: str) -> list[tuple[str, list[str]]]:
+    sections: list[tuple[str, list[str]]] = []
+    name = "Song"
+    lines: list[str] = []
+    for raw_line in lyrics.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        heading = SECTION_RE.match(line)
+        if heading:
+            if lines:
+                sections.append((name, lines))
+            name = heading.group(1).strip()
+            lines = []
+            continue
+        lines.append(line)
+    if lines:
+        sections.append((name, lines))
+    if not sections:
+        raise ValueError("Lyrics must contain at least one sung line")
+    return sections
+
+
+def build_music_v2_composition_plan(
+    *,
+    lyrics: str,
+    duration_seconds: int,
+    bpm: int,
+) -> dict:
+    """Bind approved lyrics and exact section timing for Music v2."""
+
+    sections = _parse_lyric_sections(lyrics)
+    total_ms = duration_seconds * 1000
+    if len(sections) > total_ms // 1000:
+        raise ValueError(
+            "The lyric has too many sections for the requested song duration"
+        )
+    # Give every section a minimum phrase while distributing the remainder by
+    # sung-line count. The final correction makes the total exact.
+    minimum_ms = min(3000, total_ms // len(sections))
+    remaining_ms = total_ms - minimum_ms * len(sections)
+    total_lines = sum(len(lines) for _name, lines in sections)
+    durations: list[int] = []
+    assigned = 0
+    for index, (_name, lines) in enumerate(sections):
+        if index == len(sections) - 1:
+            duration_ms = total_ms - assigned
+        else:
+            share = remaining_ms * len(lines) // total_lines
+            duration_ms = minimum_ms + share
+        durations.append(duration_ms)
+        assigned += duration_ms
+
+    plan_sections = []
+    for (name, lines), duration_ms in zip(sections, durations, strict=True):
+        local_styles = [
+            "clear warm lead vocal",
+            "highly intelligible approved lyrics",
+            "simple melody for very young children",
+        ]
+        if "ritornello" in name.casefold() or "chorus" in name.casefold():
+            local_styles.extend(
+                ["memorable singalong hook", "gentle hand claps"]
+            )
+        plan_sections.append(
+            {
+                "section_name": name,
+                "duration_ms": duration_ms,
+                "lines": lines,
+                "positive_local_styles": local_styles,
+                "negative_local_styles": [
+                    "spoken narration",
+                    "unapproved words",
+                    "dense vocal runs",
+                ],
+            }
+        )
+    return {
+        "positive_global_styles": [
+            f"{bpm} BPM",
+            "original modern preschool pop",
+            "bright major key",
+            "toy percussion and glockenspiel",
+            "polished warm production",
+        ],
+        "negative_global_styles": [
+            "dark",
+            "aggressive",
+            "frightening",
+            "rapid tempo changes",
+            "imitation of an existing song or artist",
+        ],
+        "sections": plan_sections,
+    }
 
 
 def music_request_fingerprint(
@@ -58,16 +158,28 @@ class ElevenLabsMusicProvider:
         variant: int,
     ) -> MusicResult:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        full_prompt = (
-            f"{prompt}\nTempo: {bpm} BPM. Exact target duration: {duration_seconds} seconds. "
-            "Original nursery song, gentle dynamics, clean lead vocal, highly intelligible Italian, "
-            "no imitation of existing artists or songs. Lyrics:\n" + lyrics
-        )
-        payload = {
-            "prompt": full_prompt,
-            "music_length_ms": duration_seconds * 1000,
-            "model_id": self.model_id,
-        }
+        if self.model_id == "music_v2":
+            payload = {
+                "composition_plan": build_music_v2_composition_plan(
+                    lyrics=lyrics,
+                    duration_seconds=duration_seconds,
+                    bpm=bpm,
+                ),
+                "model_id": self.model_id,
+                "sign_with_c2pa": True,
+            }
+        else:
+            full_prompt = (
+                f"{prompt}\nTempo: {bpm} BPM. Exact target duration: "
+                f"{duration_seconds} seconds. Original nursery song, gentle "
+                "dynamics, clean lead vocal, highly intelligible lyrics, no "
+                "imitation of existing artists or songs. Lyrics:\n" + lyrics
+            )
+            payload = {
+                "prompt": full_prompt,
+                "music_length_ms": duration_seconds * 1000,
+                "model_id": self.model_id,
+            }
         fingerprint = music_request_fingerprint(
             lyrics=lyrics,
             prompt=prompt,
