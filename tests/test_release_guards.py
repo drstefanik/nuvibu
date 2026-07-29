@@ -760,14 +760,29 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
     assert payload["model_id"] == "music_v2"
     assert payload["sign_with_c2pa"] is True
     plan = payload["composition_plan"]
-    assert sum(section["duration_ms"] for section in plan["sections"]) == 75_000
+    assert set(plan) == {"chunks"}
+    assert sum(chunk["duration_ms"] for chunk in plan["chunks"]) == 75_000
     assert [
-        line for section in plan["sections"] for line in section["lines"]
+        line
+        for chunk in plan["chunks"]
+        for line in chunk["text"].splitlines()[1:]
     ] == [
         "Pio pio, eccoci qua!",
         "Splash splash, salta anche tu!",
         "Arcobaleno con Nuvibù!",
     ]
+    assert all(
+        set(chunk)
+        == {
+            "text",
+            "duration_ms",
+            "positive_styles",
+            "negative_styles",
+            "context_adherence",
+        }
+        for chunk in plan["chunks"]
+    )
+    assert all(chunk["context_adherence"] == "high" for chunk in plan["chunks"])
     assert result.path == output
     assert result.metadata["song_id"] == "song-structured"
 
@@ -779,8 +794,8 @@ def test_composition_plan_keeps_short_sections_positive():
         bpm=92,
     )
 
-    assert sum(section["duration_ms"] for section in plan["sections"]) == 15_000
-    assert all(section["duration_ms"] > 0 for section in plan["sections"])
+    assert sum(chunk["duration_ms"] for chunk in plan["chunks"]) == 15_000
+    assert all(chunk["duration_ms"] >= 3000 for chunk in plan["chunks"])
 
 
 def test_composition_plan_rejects_too_many_sections_for_duration():
@@ -792,3 +807,43 @@ def test_composition_plan_rejects_too_many_sections_for_duration():
             duration_seconds=15,
             bpm=92,
         )
+
+
+def test_music_validation_error_is_actionable_and_retryable(
+    tmp_path: Path,
+    monkeypatch,
+):
+    class Response:
+        status_code = 422
+        headers = {"content-type": "application/json"}
+        content = b'{"detail":[{"loc":["body","composition_plan","chunks"],"msg":"Field required"}]}'
+        text = content.decode()
+
+        def json(self):
+            return json.loads(self.content)
+
+    monkeypatch.setattr(
+        "app.providers.elevenlabs.httpx.post",
+        lambda *_args, **_kwargs: Response(),
+    )
+    provider = ElevenLabsMusicProvider(
+        api_key="secret",
+        model_id="music_v2",
+        output_format="mp3_48000_192",
+    )
+    output = tmp_path / "song.mp3"
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"ElevenLabs rejected the music request \(422\).*chunks",
+    ):
+        provider.generate(
+            lyrics="[Intro]\nCanta con Nuvibù!",
+            prompt="Original preschool song",
+            duration_seconds=15,
+            bpm=92,
+            output_path=output,
+            variant=1,
+        )
+
+    assert not music_receipt_path(output).exists()
