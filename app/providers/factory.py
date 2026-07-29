@@ -4,7 +4,7 @@ from ..config import Settings
 from .base import MusicProvider, VideoProvider
 from .elevenlabs import ElevenLabsMusicProvider
 from .mock import MockMusicProvider, MockVideoProvider
-from .veo import VeoProvider
+from .text_safe_veo import TextSafeVeoProvider
 
 
 def get_music_provider(settings: Settings) -> MusicProvider:
@@ -20,7 +20,7 @@ def get_music_provider(settings: Settings) -> MusicProvider:
 def get_video_provider(settings: Settings) -> VideoProvider:
     if settings.provider_mode == "mock":
         return MockVideoProvider()
-    return VeoProvider(
+    return TextSafeVeoProvider(
         project=settings.google_cloud_project or "",
         location=settings.google_cloud_location,
         model=settings.veo_model,
