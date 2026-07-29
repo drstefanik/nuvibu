@@ -378,7 +378,12 @@
       {% for scene in episode.storyboard_json %}
       <li>
         <span>{{ scene.start_seconds }}–{{ scene.start_seconds + scene.duration_seconds }}s</span>
-        <p><strong>{{ scene.word }}</strong><br>{{ scene.action }}</p>
+        <p>
+          <strong>{{ scene.word }}</strong><br>
+          {% if scene.lyric_cue %}<em>“{{ scene.lyric_cue }}”</em><br>{% endif %}
+          {{ scene.action }}
+          {% if scene.shot %}<br><small>{{ scene.shot }}</small>{% endif %}
+        </p>
       </li>
       {% endfor %}
     </ol>
