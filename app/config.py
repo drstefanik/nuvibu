@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     max_music_variants: int = Field(default=1, ge=1, le=8)
     max_scene_retries: int = Field(default=0, ge=0, le=5)
     max_estimated_cost_usd_per_episode: float = Field(default=40.0, ge=1.0, le=1000.0)
-    max_daily_estimated_cost_usd: float = Field(default=40.0, ge=1.0, le=5000.0)
+    max_daily_estimated_cost_usd: float = Field(default=60.0, ge=1.0, le=5000.0)
 
     @field_validator("database_url")
     @classmethod

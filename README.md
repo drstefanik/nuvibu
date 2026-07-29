@@ -146,14 +146,14 @@ repository o nell'immagine.
 
 ```dotenv
 MAX_ESTIMATED_COST_USD_PER_EPISODE=40
-MAX_DAILY_ESTIMATED_COST_USD=40
+MAX_DAILY_ESTIMATED_COST_USD=60
 MAX_MUSIC_VARIANTS=1
 MAX_SCENE_RETRIES=0
 ```
 
 La pipeline interrompe il job quando la stima supera il tetto per episodio o
 quello giornaliero. Cloud Run consente episodi fino a 180 secondi e mantiene un
-tetto di 40 USD per episodio e 40 USD al giorno. Il formato editoriale
+tetto di 40 USD per episodio e 60 USD al giorno. Il formato editoriale
 consigliato parte da 75 secondi. Musica e render partono soltanto dopo una
 conferma esplicita nella console. I costi registrati vanno riconciliati con i
 pannelli dei provider. Il limite giornaliero comprende anche la spesa prenotata
