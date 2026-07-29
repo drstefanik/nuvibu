@@ -7,19 +7,32 @@ BUCKET_NAME="${NUVIBU_BUCKET:-}"
 VEO_BACKEND="${VEO_BACKEND:-vertex}"
 VEO_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 REPOSITORY="${ARTIFACT_REPOSITORY:-nuvibu}"
-IMAGE_TAG="${IMAGE_TAG:-$(git rev-parse --short HEAD)}"
-IMAGE="${RUN_REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nuvibu:${IMAGE_TAG}"
 WEB_SERVICE="nuvibu-web"
 WORKER_JOB="nuvibu-worker"
 WEB_SA="nuvibu-web@${PROJECT_ID}.iam.gserviceaccount.com"
 WORKER_SA="nuvibu-worker@${PROJECT_ID}.iam.gserviceaccount.com"
 
-for command_name in curl gcloud git python3; do
+for command_name in awk curl gcloud git python3 sha256sum; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "Missing required command: ${command_name}" >&2
     exit 1
   fi
 done
+
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
+  echo "Refusing to deploy a dirty worktree." >&2
+  echo "Commit the exact Nuvibù source and assets before deploying." >&2
+  git status --short >&2
+  exit 1
+fi
+
+SOURCE_COMMIT="$(git rev-parse HEAD)"
+if [[ -n "${IMAGE_TAG:-}" && "${IMAGE_TAG}" != "${SOURCE_COMMIT}" ]]; then
+  echo "IMAGE_TAG must equal the full release commit ${SOURCE_COMMIT}" >&2
+  exit 1
+fi
+IMAGE_TAG="${SOURCE_COMMIT}"
+IMAGE="${RUN_REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/nuvibu:${IMAGE_TAG}"
 
 case "${VEO_BACKEND}" in
   vertex)
@@ -304,8 +317,23 @@ if [[ "${LOGIN_PAGE}" != *"Accedi allo studio"* ]]; then
   echo "Login smoke test failed for ${SERVICE_URL}/login" >&2
   exit 1
 fi
+EMMA_THUMBNAIL_PATH="app/static/emma-looks/emma-pink-dress-v1.webp"
+EXPECTED_EMMA_THUMBNAIL_SHA="$(
+  sha256sum "${EMMA_THUMBNAIL_PATH}" | awk '{print $1}'
+)"
+DEPLOYED_EMMA_THUMBNAIL_SHA="$(
+  curl --fail --silent --show-error \
+    "${SERVICE_URL}/static/emma-looks/emma-pink-dress-v1.webp?release=${SOURCE_COMMIT}" \
+    | sha256sum \
+    | awk '{print $1}'
+)"
+if [[ "${DEPLOYED_EMMA_THUMBNAIL_SHA}" != "${EXPECTED_EMMA_THUMBNAIL_SHA}" ]]; then
+  echo "Emma look asset smoke test failed for ${SERVICE_URL}" >&2
+  exit 1
+fi
 
 echo "Nuvibu web: ${SERVICE_URL}"
 echo "Worker job: ${WORKER_JOB} (${RUN_REGION})"
 echo "Media bucket: gs://${BUCKET_NAME}"
+echo "Release commit: ${SOURCE_COMMIT}"
 echo "Veo backend: ${VEO_BACKEND} (${VEO_MODEL}, ${VEO_LOCATION})"

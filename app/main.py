@@ -26,6 +26,10 @@ from .auth import (
 )
 from .config import get_settings
 from .database import get_db, init_db
+from .emma_looks import (
+    EMMA_LOOKS,
+    NEW_EPISODE_DEFAULT_LOOK_ID,
+)
 from .models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus, MetricSnapshot, PublishRecord
 from .providers.youtube import YouTubeClient
 from .schemas import EpisodeCreate, MetricCreate, PipelineRequest
@@ -690,7 +694,13 @@ def create_episode_form(
     while db.scalar(select(Episode.id).where(Episode.working_slug == candidate)):
         candidate = f"{base_slug}-{number}"
         number += 1
-    episode = Episode(working_slug=candidate, **payload.model_dump())
+    episode = Episode(
+        working_slug=candidate,
+        concept_json={
+            "emma_look_id": NEW_EPISODE_DEFAULT_LOOK_ID,
+        },
+        **payload.model_dump(),
+    )
     db.add(episode)
     db.commit()
     db.refresh(episode)
@@ -710,7 +720,13 @@ def create_episode_api(payload: EpisodeCreate, db: Session = Depends(get_db)):
     while db.scalar(select(Episode.id).where(Episode.working_slug == candidate)):
         candidate = f"{base_slug}-{number}"
         number += 1
-    episode = Episode(working_slug=candidate, **payload.model_dump())
+    episode = Episode(
+        working_slug=candidate,
+        concept_json={
+            "emma_look_id": NEW_EPISODE_DEFAULT_LOOK_ID,
+        },
+        **payload.model_dump(),
+    )
     db.add(episode)
     db.commit()
     db.refresh(episode)
@@ -748,6 +764,8 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
         for asset in service.reference_pack_assets(episode)
     }
     legacy_reference = service.legacy_reference_asset(episode)
+    selected_emma_look_id = service.selected_emma_look_id(episode)
+    selected_emma_look = service.selected_emma_look(episode)
     return templates.TemplateResponse(
         request, "episode_detail.html",
         {
@@ -787,6 +805,9 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
             "legacy_reference": legacy_reference,
             "reference_role_order": REFERENCE_ROLE_ORDER,
             "reference_role_labels": REFERENCE_ROLE_LABELS,
+            "emma_looks": EMMA_LOOKS,
+            "selected_emma_look_id": selected_emma_look_id,
+            "selected_emma_look": selected_emma_look,
             "has_qc": service.has_valid_asset(
                 episode,
                 AssetKind.REPORT,
@@ -974,9 +995,37 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     }
 
 
+@app.post("/episodes/{episode_id}/emma-look")
+def select_emma_look(
+    episode_id: str,
+    emma_look_id: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    if emma_look_id not in {look.id for look in EMMA_LOOKS}:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Emma look",
+        )
+    try:
+        PipelineService(db, settings).set_emma_look(
+            episode,
+            emma_look_id,
+        )
+    except ReferenceChangeConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}#character-reference",
+        status_code=303,
+    )
+
+
 @app.post("/episodes/{episode_id}/reference")
 def upload_reference_pack(
     episode_id: str,
+    emma_look_id: str = Form(""),
     existing_role: str = Form(""),
     friends_file: UploadFile | None = File(None),
     world_file: UploadFile | None = File(None),
@@ -991,14 +1040,25 @@ def upload_reference_pack(
     allowed_types = {"image/png", "image/jpeg", "image/webp"}
     temporary_paths: dict[str, Path] = {}
     try:
+        selected_emma_look_id = (
+            emma_look_id or service.selected_emma_look_id(episode)
+        )
+        if selected_emma_look_id not in {
+            look.id for look in EMMA_LOOKS
+        }:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid Emma look",
+            )
         sources = {
             service.explicit_reference_role(asset): Path(asset.path)
             for asset in service.reference_pack_assets(episode)
         }
-        # Emma is a locked global series asset. Never ask the editor to find
-        # or re-upload her for every episode, and override the retired cloud
-        # hero reference from pre–Emma & Friends episodes.
-        sources["emma"] = service.official_emma_reference()
+        # Emma always comes from the bundled allowlist; the service replaces
+        # this placeholder with the exact selected catalog bytes.
+        sources["emma"] = service.selected_emma_look(
+            episode,
+        ).reference_path
         legacy_reference = service.legacy_reference_asset(episode)
         if legacy_reference is not None:
             if existing_role not in {"friends", "world"}:
@@ -1062,6 +1122,7 @@ def upload_reference_pack(
             service.save_reference_pack(
                 episode,
                 sources,
+                emma_look_id=selected_emma_look_id,
             )
         except ReferenceChangeConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc

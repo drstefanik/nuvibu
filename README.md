@@ -4,7 +4,7 @@
 
 Console autonoma per progettare, produrre, revisionare e misurare **canzoni e cartoni originali per un canale YouTube made-for-kids**. Il progetto non è collegato a British Institutes o Digital Campus.
 
-L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends**. Emma, cartoonizzata dalle reference familiari approvate, è la protagonista fissa di ogni episodio; la nuvola Nuvi è la sua spalla ricorrente. La Character Bible blocca volto, silhouette, outfit e gerarchia del cast. Nome, handle e marchio devono comunque essere verificati prima del lancio pubblico.
+L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends**. Emma, cartoonizzata dalle reference familiari approvate, è la protagonista fissa di ogni episodio; la nuvola Nuvi è la sua spalla ricorrente. La Character Bible rende immutabili volto, occhi, capelli, silhouette e gerarchia del cast. Il guardaroba è limitato a dieci look ufficiali precaricati: ogni episodio ne usa esattamente uno, senza cambi d’abito tra le scene. Nome, handle e marchio devono comunque essere verificati prima del lancio pubblico.
 
 ## Stato del progetto
 
@@ -15,6 +15,8 @@ L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends*
 - varianti musicali e adattatore ElevenLabs Music;
 - storyboard automatico in scene;
 - adattatore Google Veo dual backend (Gemini API o Vertex AI) con character reference;
+- catalogo bloccato di dieci look di Emma, scelti tramite anteprima cliccabile e fissati per episodio;
+- copia della reference scelta salvata con l’episodio e inviata a Veo come immagine 1;
 - modalità mock offline e senza crediti;
 - montaggio FFmpeg 16:9;
 - Short verticale 9:16;
@@ -46,7 +48,8 @@ L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends*
 | Avatar canale | `brand/nuvibu-avatar-800.png` |
 | Banner YouTube | `brand/nuvibu-youtube-banner-2560x1440.png` |
 | Key art Emma & Friends | `brand/source/nuvibu-key-art.png` |
-| Reference ufficiale Emma | `brand/source/emma-character-sheet.png` |
+| Dieci reference look Emma | `brand/source/emma-looks/*.png` |
+| Alias Emma per compatibilità | `brand/source/emma-character-sheet.png` |
 | Reference Nuvi, la nuvola | `brand/source/nuvi-cloud-key-art.png` |
 | Concept “Pulcini Arcobaleno” | `brand/concepts/pulcini-arcobaleno.png` |
 | Concept “Cucù dietro la nuvola” | `brand/concepts/cucu-dietro-la-nuvola.png` |
@@ -55,6 +58,21 @@ L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends*
 ![Concept Pulcini Arcobaleno](brand/concepts/pulcini-arcobaleno.png)
 
 La modalità mock usa queste immagini approvate per creare preview animate con pan e zoom. È un test della pipeline, **non un sostituto della generazione video live**.
+
+### Selezione del look di Emma
+
+Nel Reference pack l’editor sceglie il look dalla griglia
+**“Scegli il look di Emma”**, cliccando una delle dieci anteprime ufficiali.
+Non è possibile caricare una reference Emma arbitraria. La scelta viene
+registrata sull’episodio e resta la stessa per tutte le scene, i retry, il
+video, lo Short e la thumbnail.
+
+I nuovi episodi usano **Rosa confetto** come preselezione. Per compatibilità,
+un episodio esistente privo di una scelta registrata usa
+**Classico Nuvibù**. Appena la produzione video inizia, il look è bloccato.
+La piattaforma conserva una copia specifica della reference con l’episodio e
+la invia a Veo come immagine 1; amici e mondo restano rispettivamente le
+immagini 2 e 3.
 
 ## Pipeline
 
@@ -65,9 +83,10 @@ Brief
   → storyboard
   → revisione e approvazione storyboard
   → conferma costo e musica
-  → reference ufficiale Emma + amici + mondo
+  → scelta di uno dei 10 look Emma + amici + mondo
   → conferma costo e scene AI
-  → scene AI con Emma obbligatoria come image 1
+  → copia del look salvata per l’episodio
+  → scene AI con quella copia di Emma obbligatoria come image 1
   → video 16:9
   → Short 9:16 + thumbnail
   → QC automatico
@@ -227,5 +246,5 @@ data/       profilo canale, Character Bible e piano editoriale
 - Il progetto non copia testi, melodie, personaggi, grafiche o titoli di altri canali.
 - Nessun algoritmo garantisce visualizzazioni o monetizzazione.
 - Il QC automatico verifica struttura e regole, non sostituisce la revisione umana.
-- I concept inclusi definiscono la qualità visiva, ma la consistenza seriale richiede reference bloccate o un rig/modello dedicato.
+- I concept inclusi definiscono la qualità visiva; la consistenza seriale usa un solo look Emma bloccato per episodio e, per produzioni più lunghe, può beneficiare di un rig/modello dedicato.
 - La pubblicazione automatica in pubblico resta disabilitata per scelta progettuale.

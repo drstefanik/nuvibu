@@ -10,6 +10,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
+from app.emma_looks import NEW_EPISODE_DEFAULT_LOOK_ID
 from app.models import Episode
 from app.services.pipeline import PipelineService
 
@@ -42,6 +43,9 @@ def main() -> None:
                 bpm=112,
                 visual_pacing="energetic",
                 language="it",
+                concept_json={
+                    "emma_look_id": NEW_EPISODE_DEFAULT_LOOK_ID,
+                },
             )
             db.add(episode)
             db.commit()

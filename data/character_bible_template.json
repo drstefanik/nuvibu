@@ -12,19 +12,72 @@
       "round rosy cheeks and warm light skin",
       "thick dark chestnut-brown hair",
       "one high playful ponytail/top sprout tied with a pastel-pink hair tie",
-      "soft sky-blue short-sleeve T-shirt",
-      "exact lowercase white word nuvibu printed once across the T-shirt chest",
-      "butter-yellow toddler shorts",
-      "pale-pink soft shoes",
       "recognisable baby face and age-appropriate proportions"
     ],
     "approved_palette": {
-      "shirt_sky_blue": "#69B9EA",
-      "shorts_butter_yellow": "#F4C85A",
-      "shoes_blush_pink": "#F3A5B9",
       "hair_chestnut": "#73452E",
       "eyes_grey_green": "#4D5B49",
-      "skin_warm_light": "#FFD1B8"
+      "skin_warm_light": "#FFD1B8",
+      "hair_tie_pastel_pink": "#F3A5B9"
+    },
+    "wardrobe_policy": {
+      "selection_mode": "locked preloaded catalog only",
+      "catalog_size": 10,
+      "episode_rule": "exactly one approved look is selected per episode and remains fixed across every scene, render, retry and derivative asset of that episode",
+      "new_episode_default": {
+        "id": "emma-pink-dress-v1",
+        "name": "Rosa confetto"
+      },
+      "legacy_episode_default": {
+        "id": "emma-classic-nuvibu-v1",
+        "name": "Classico Nuvibù",
+        "applies_when": "an existing episode has no stored look selection"
+      },
+      "editor_selection": "the editor chooses a look by clicking its preview thumbnail; the selected value and an episode-specific image copy are stored with the episode",
+      "veo_mapping": "the episode-specific stored copy of the selected look is sent to Veo as image 1",
+      "arbitrary_uploads": "forbidden; editors cannot upload, replace or improvise an Emma reference outside the ten approved looks",
+      "approved_looks": [
+        {
+          "id": "emma-classic-nuvibu-v1",
+          "name": "Classico Nuvibù"
+        },
+        {
+          "id": "emma-pink-dress-v1",
+          "name": "Rosa confetto"
+        },
+        {
+          "id": "emma-lilac-overalls-v1",
+          "name": "Salopette lilla"
+        },
+        {
+          "id": "emma-sunshine-romper-v1",
+          "name": "Sole giallo"
+        },
+        {
+          "id": "emma-sky-sailor-v1",
+          "name": "Marinaretta cielo"
+        },
+        {
+          "id": "emma-mint-pinafore-v1",
+          "name": "Grembiulino menta"
+        },
+        {
+          "id": "emma-peach-rainbow-v1",
+          "name": "Arcobaleno pesca"
+        },
+        {
+          "id": "emma-starry-bedtime-v1",
+          "name": "Nanna stellata"
+        },
+        {
+          "id": "emma-coral-party-v1",
+          "name": "Festa corallo"
+        },
+        {
+          "id": "emma-cream-winter-v1",
+          "name": "Inverno crema"
+        }
+      ]
     },
     "approved_expressions": [
       "joyful welcome",
@@ -48,13 +101,14 @@
       "missing or extra limbs or fingers",
       "older-child or adult proportions",
       "different eye color, face shape, hair color or top-sprout silhouette",
-      "different default wardrobe",
-      "misspelled, duplicated or replaced nuvibu shirt word",
+      "an Emma wardrobe outside the ten locked preloaded looks",
+      "changing, combining or recoloring the selected look within an episode",
+      "arbitrary editor-uploaded Emma references",
       "pacifier in production scenes unless explicitly required by the episode",
       "heavy makeup or doll-like plastic face",
       "dark horror lighting",
       "third-party brand logos",
-      "text embedded in generated scenes except the locked nuvibu shirt word",
+      "text embedded in generated scenes except the exact official lowercase nuvibu wordmark when the selected look is Classico Nuvibù",
       "flat minimalist or generic clip-art rendering"
     ]
   },
@@ -75,7 +129,7 @@
     "style": "premium polished 3D preschool animation with tactile soft materials, cinematic lighting and strong mobile readability",
     "detail": "rich and specific, never empty; one clear focal action led by Emma with organized supporting details",
     "color": "vivid, joyful and warm while preserving clean separation between characters and background",
-    "consistency": "every scene must use the approved Emma reference as image 1; image 2 is the episode friend cast and image 3 is the empty episode world"
+    "consistency": "every scene must use the episode-specific stored copy of its selected locked Emma look as image 1; image 2 is the episode friend cast and image 3 is the empty episode world"
   },
   "camera_rules": {
     "shot_length_seconds_min": 3,

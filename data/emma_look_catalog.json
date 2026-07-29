@@ -1,0 +1,97 @@
+{
+  "catalog_version": 1,
+  "legacy_default": "emma-classic-nuvibu-v1",
+  "new_episode_default": "emma-pink-dress-v1",
+  "looks": [
+    {
+      "id": "emma-classic-nuvibu-v1",
+      "display_name": "Classico Nuvibù",
+      "reference_path": "brand/source/emma-looks/emma-classic-nuvibu-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-classic-nuvibu-v1.webp",
+      "reference_sha256": "06b558574ae7a9356ae87b6c4774c5a0af91ee8cee1d6d1697f0bd416f852f80",
+      "outfit_prompt": "Emma wears the locked classic Nuvibù outfit: a sky-blue short-sleeved T-shirt with the official white lowercase \"nuvibu\" wordmark, butter-yellow toddler shorts, and soft pink shoes.",
+      "alt_text": "Emma con T-shirt azzurra Nuvibù, pantaloncini gialli e scarpine rosa"
+    },
+    {
+      "id": "emma-pink-dress-v1",
+      "display_name": "Rosa confetto",
+      "reference_path": "brand/source/emma-looks/emma-pink-dress-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-pink-dress-v1.webp",
+      "reference_sha256": "5776afee6ef6eb7c4c45f161edf059bad635c438ed96d43c2a910aebb591827b",
+      "outfit_prompt": "Emma wears the locked candy-pink outfit: a soft pastel-pink short-sleeved baby dress with a rounded white collar and white piping, a clearly visible white nappy cover underneath, and soft pink shoes.",
+      "alt_text": "Emma con vestitino rosa confetto, coulotte bianca e scarpine rosa"
+    },
+    {
+      "id": "emma-lilac-overalls-v1",
+      "display_name": "Salopette lilla",
+      "reference_path": "brand/source/emma-looks/emma-lilac-overalls-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-lilac-overalls-v1.webp",
+      "reference_sha256": "1159bbfca9c2357ceb869e27f9340d1e0e4cef6918b25a99c94ad4bfc58605b9",
+      "outfit_prompt": "Emma wears the locked lilac outfit: short lilac baby overalls over a plain ivory short-sleeved T-shirt, with a covered tummy and soft pink shoes.",
+      "alt_text": "Emma con salopette corta lilla, body avorio e scarpine rosa"
+    },
+    {
+      "id": "emma-sunshine-romper-v1",
+      "display_name": "Sole giallo",
+      "reference_path": "brand/source/emma-looks/emma-sunshine-romper-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-sunshine-romper-v1.webp",
+      "reference_sha256": "756089c83584193f14b234b546bb4b4942ed1959895cce7b31e103d035da2474",
+      "outfit_prompt": "Emma wears the locked sunshine outfit: a butter-yellow short-sleeved baby romper with a small rounded ivory collar and white trim, a covered tummy, and soft pink shoes.",
+      "alt_text": "Emma con pagliaccetto giallo sole, colletto avorio e scarpine rosa"
+    },
+    {
+      "id": "emma-sky-sailor-v1",
+      "display_name": "Marinaretta cielo",
+      "reference_path": "brand/source/emma-looks/emma-sky-sailor-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-sky-sailor-v1.webp",
+      "reference_sha256": "fd433e809cfd6e1186233f33937b46e69663a72d8f27b1ee2c9e5c4325270fe0",
+      "outfit_prompt": "Emma wears the locked sky-sailor outfit: a powder-blue short-sleeved baby dress with a simple white sailor collar, a small powder-blue fabric bow, white ruffled bloomers visible beneath the hem, and soft pink shoes; no stripes or emblems.",
+      "alt_text": "Emma con vestitino celeste, colletto marinaretto bianco, coulotte e scarpine rosa"
+    },
+    {
+      "id": "emma-mint-pinafore-v1",
+      "display_name": "Grembiulino menta",
+      "reference_path": "brand/source/emma-looks/emma-mint-pinafore-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-mint-pinafore-v1.webp",
+      "reference_sha256": "a953c5543cdd84995ea12b4fd056ce6c503d669557b194ef6b95db326a85342c",
+      "outfit_prompt": "Emma wears the locked mint outfit: a pastel-mint baby pinafore over a plain cream short-sleeved bodysuit, with a rounded white collar, a visible white nappy cover underneath, and soft pink shoes.",
+      "alt_text": "Emma con grembiulino menta, body crema e scarpine rosa"
+    },
+    {
+      "id": "emma-peach-rainbow-v1",
+      "display_name": "Arcobaleno pesca",
+      "reference_path": "brand/source/emma-looks/emma-peach-rainbow-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-peach-rainbow-v1.webp",
+      "reference_sha256": "95236e0d40ac5b0348544df7a65964a95824a105abba1508582aa295c854d695",
+      "outfit_prompt": "Emma wears the locked peach-rainbow outfit: a lavender short-sleeved cotton T-shirt with one small pastel rainbow motif centered on the chest, soft peach toddler shorts, and soft pink shoes; no lettering.",
+      "alt_text": "Emma con T-shirt lilla, piccolo arcobaleno pastello, shorts pesca e scarpine rosa"
+    },
+    {
+      "id": "emma-starry-bedtime-v1",
+      "display_name": "Nanna stellata",
+      "reference_path": "brand/source/emma-looks/emma-starry-bedtime-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-starry-bedtime-v1.webp",
+      "reference_sha256": "5fccb502838ce3e5335aa19dd74e5d05fa6a307400db93f21050475d032408b1",
+      "outfit_prompt": "Emma wears the locked starry-bedtime outfit: a soft lavender two-piece toddler pajama set with a long-sleeved top, relaxed full-length bottoms, sparse tiny warm-white stars, a white rounded collar, white cuffs, and soft pink bedtime slippers.",
+      "alt_text": "Emma con pigiama lavanda a due pezzi, stelline chiare e pantofole rosa"
+    },
+    {
+      "id": "emma-coral-party-v1",
+      "display_name": "Festa corallo",
+      "reference_path": "brand/source/emma-looks/emma-coral-party-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-coral-party-v1.webp",
+      "reference_sha256": "d39a5be54bd8e9fb31829637fbd0f8c1435a973e86248174cbc6265c3c674dd5",
+      "outfit_prompt": "Emma wears the locked coral-party outfit: a warm pastel-coral short baby romper with subtle ruffled shoulders, a simple rounded cream collar, delicate white piping, and soft pink shoes.",
+      "alt_text": "Emma con pagliaccetto da festa corallo, colletto bianco e scarpine rosa"
+    },
+    {
+      "id": "emma-cream-winter-v1",
+      "display_name": "Inverno crema",
+      "reference_path": "brand/source/emma-looks/emma-cream-winter-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-cream-winter-v1.webp",
+      "reference_sha256": "57263c82d8e416347ebfcbfeba6445345abf9e3dfeb5800ba7c9e57589634042",
+      "outfit_prompt": "Emma wears the locked cream-winter outfit: a warm cream fine-knit cardigan over a blush-pink long-sleeved baby romper, warm cream tights, and soft pink shoes.",
+      "alt_text": "Emma con cardigan crema, pagliaccetto rosa cipria, calzamaglia e scarpine rosa"
+    }
+  ]
+}

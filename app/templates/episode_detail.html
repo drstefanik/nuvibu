@@ -328,6 +328,35 @@
   </div>
   <p class="muted">Veo riceverà sempre, nello stesso ordine, Emma, gli amici selezionati e il mondo dell’episodio. Emma resta la protagonista di ogni scena; la nuvola e gli altri personaggi sono i suoi compagni.</p>
 
+  <form class="emma-look-form" action="/episodes/{{ episode.id }}/emma-look" method="post">
+    <fieldset>
+      <legend>Scegli il look di Emma</legend>
+      <p>Scegli una delle dieci reference ufficiali. Il look selezionato verrà usato in tutte le scene dell’episodio.</p>
+      <div class="emma-look-grid">
+        {% for look in emma_looks %}
+        {% set is_selected = look.id == selected_emma_look_id %}
+        <button
+          class="emma-look-choice{% if is_selected %} emma-look-choice-selected{% endif %}"
+          type="submit"
+          name="emma_look_id"
+          value="{{ look.id }}"
+          data-emma-look-id="{{ look.id }}"
+          aria-label="Usa il look {{ look.display_name }} per Emma"
+          aria-pressed="{{ 'true' if is_selected else 'false' }}"
+          {% if not reference_pack_mutable %}aria-disabled="true" disabled{% endif %}
+        >
+          <img src="{{ look.thumbnail_url }}" alt="{{ look.alt_text }}">
+          <span class="emma-look-name">{{ look.display_name }}</span>
+          {% if is_selected %}<span class="emma-look-selected-badge">Selezionato</span>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+    </fieldset>
+  </form>
+  {% if not reference_pack_mutable %}
+  <p class="locked-note emma-look-locked-note">Il look è bloccato perché la produzione video è già iniziata.</p>
+  {% endif %}
+
   {% if legacy_reference %}
   <article class="legacy-reference">
     <div>
@@ -345,10 +374,10 @@
     <article class="reference-card{% if asset or role == 'emma' %} reference-card-ready{% endif %}">
       <div class="reference-card-heading">
         <strong>{{ loop.index }}. {{ reference_role_labels.get(role) }}</strong>
-        <span class="status{% if asset or role == 'emma' %} status-approved{% endif %}">{% if role == 'emma' %}ufficiale{% elif asset %}pronta{% else %}manca{% endif %}</span>
+        <span class="status{% if asset or role == 'emma' %} status-approved{% endif %}">{% if role == 'emma' %}selezionato{% elif asset %}pronta{% else %}manca{% endif %}</span>
       </div>
       {% if role == 'emma' %}
-      <img class="reference-preview" src="/static/emma-character-sheet.png" alt="Reference ufficiale Emma">
+      <img class="reference-preview" src="{{ selected_emma_look.thumbnail_url }}" alt="Reference ufficiale Emma — {{ selected_emma_look.alt_text }}">
       {% elif asset %}
       <img class="reference-preview" src="/assets/{{ asset.id }}" alt="Reference {{ reference_role_labels.get(role) }}">
       {% else %}
@@ -362,6 +391,7 @@
   <p class="locked-note">Il reference pack non può essere modificato mentre il worker è attivo.</p>
   {% elif reference_pack_mutable and has_music and storyboard_approved %}
   <form class="reference-upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data">
+    <input type="hidden" name="emma_look_id" value="{{ selected_emma_look_id }}">
     {% if legacy_reference %}
     <label class="existing-reference-role" for="existing-reference-role">L’immagine già caricata è
       <small>Assegnala agli amici oppure al mondo dell’episodio.</small>
@@ -373,8 +403,8 @@
     </label>
     {% endif %}
     <div class="reference-locked">
-      <strong>1. Emma</strong>
-      <small>Reference ufficiale bloccata per tutta la serie</small>
+      <strong>1. Emma — {{ selected_emma_look.display_name }}</strong>
+      <small>Look ufficiale scelto sopra; non serve caricare Emma</small>
     </div>
     <label for="friends-reference-file">2. Amici dell’episodio
       <small>{% if reference_assets.get('friends') %}Già presenti; scegli un file solo per sostituirli{% else %}Tutto il cast secondario, completo e su un’unica immagine{% endif %}</small>

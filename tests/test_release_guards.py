@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -7,12 +8,14 @@ from pathlib import Path
 import httpx
 import numpy as np
 import pytest
+from PIL import Image
 from pydantic import ValidationError
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
+from app.emma_looks import CATALOG_VERSION, get_emma_look
 from app.main import worker_dispatch_due
 from app.media import (
     MUSIC_MIN_LOW_BAND_ENERGY_RATIO,
@@ -41,6 +44,11 @@ def make_session(tmp_path: Path):
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def write_png(path: Path, color: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (32, 32), color).save(path, "PNG")
 
 
 def test_production_configuration_fails_closed_by_default():
@@ -171,6 +179,20 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
         service = PipelineService(db, settings)
         provider = CountingVideoProvider()
         service._video_provider = provider
+        look = get_emma_look("emma-starry-bedtime-v1")
+        reference_sources = {
+            "emma": tmp_path / "untrusted-emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        write_png(reference_sources["emma"], "black")
+        write_png(reference_sources["friends"], "red")
+        write_png(reference_sources["world"], "green")
+        service.save_reference_pack(
+            episode,
+            reference_sources,
+            emma_look_id=look.id,
+        )
         service.generate_storyboard(episode)
         for scene in episode.storyboard_json:
             scene["prompt"] = "Legacy cloud-led storyboard prompt"
@@ -189,6 +211,39 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
         assert all(
             "Nuvibù is the name of the platform" in prompt
             for prompt in provider.prompts
+        )
+        assert all(look.outfit_prompt in prompt for prompt in provider.prompts)
+        assert all(
+            "locked candy-pink outfit" not in prompt
+            and "pastel-pink short-sleeved baby dress" not in prompt
+            for prompt in provider.prompts
+        )
+        scene_assets = db.scalars(
+            select(Asset)
+            .where(
+                Asset.episode_id == episode.id,
+                Asset.kind == AssetKind.VIDEO_SCENE,
+            )
+            .order_by(Asset.variant)
+        ).all()
+        assert len(scene_assets) == len(episode.storyboard_json)
+        assert all(
+            asset.metadata_json["emma_look_id"] == look.id
+            for asset in scene_assets
+        )
+        assert all(
+            asset.metadata_json["emma_look_catalog_version"]
+            == CATALOG_VERSION
+            for asset in scene_assets
+        )
+        frozen_emma = service.reference_images(episode)[0]
+        frozen_emma_sha256 = hashlib.sha256(
+            frozen_emma.read_bytes()
+        ).hexdigest()
+        assert all(
+            asset.metadata_json["emma_reference_sha256"]
+            == frozen_emma_sha256
+            for asset in scene_assets
         )
 
 

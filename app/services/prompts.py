@@ -14,12 +14,26 @@ EMMA_VISUAL_GUARD = (
     "approved Emma reference: nine-month-old baby proportions, large "
     "grey-green eyes, round rosy cheeks, warm light skin, thick dark "
     "chestnut-brown hair with one high playful ponytail tied in pastel pink, "
-    "sky-blue T-shirt with the exact lowercase white word 'nuvibu', "
-    "butter-yellow shorts and pale-pink soft shoes. Nuvibù is the name of the "
+    "with the exact face, hair silhouette and proportions shown in reference "
+    "image 1. Preserve exactly the single approved outfit shown in reference "
+    "image 1 for the whole episode; never mix garments or colors from another "
+    "Emma look. Nuvibù is the name of the "
     "platform and channel, not a character. The small plush white cloud is "
     "Emma's secondary friend and must never replace, obscure or visually "
     "dominate her. "
 )
+
+
+def emma_visual_guard(outfit_prompt: str) -> str:
+    """Bind Emma's immutable identity to one catalog outfit for an episode."""
+
+    return (
+        EMMA_VISUAL_GUARD
+        + "Locked wardrobe for this episode: "
+        + outfit_prompt.strip()
+        + " The locked wardrobe description and reference image 1 supersede "
+        "any older wardrobe wording that may remain in a saved storyboard. "
+    )
 
 
 def featured_characters(episode: Episode) -> list[str]:

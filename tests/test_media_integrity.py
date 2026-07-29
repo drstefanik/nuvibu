@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
+from app.emma_looks import (
+    CATALOG_VERSION,
+    LEGACY_DEFAULT_LOOK_ID,
+    get_emma_look,
+)
 from app.media import is_valid_video
 from app.models import Asset, AssetKind, EpisodeStatus, Job, JobStatus
 from app.services.pipeline import (
@@ -18,6 +24,14 @@ from app.services.pipeline import (
     ReferenceChangeConflictError,
 )
 from tests.test_pipeline import make_episode
+
+
+REFERENCE_PACK_IMAGES = (
+    Path("reference-packs/la-fattoria/02-amici-episodio.png"),
+    Path("reference-packs/la-fattoria/03-mondo-episodio.png"),
+    Path("reference-packs/nanna-arcobaleno/02-amici-elementi-episodio.png"),
+    Path("reference-packs/nanna-arcobaleno/03-mondo-episodio.png"),
+)
 
 
 def make_session(tmp_path: Path):
@@ -44,6 +58,31 @@ def make_settings(tmp_path: Path) -> Settings:
 def write_png(path: Path, color: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", (32, 32), color).save(path, "PNG")
+
+
+def image_semantic_sha256(path: Path) -> str:
+    with Image.open(path) as image:
+        image.load()
+        digest = hashlib.sha256(
+            f"{image.mode}:{image.width}x{image.height}:".encode("ascii")
+        )
+        digest.update(image.tobytes())
+    return digest.hexdigest()
+
+
+@pytest.mark.parametrize("relative_path", REFERENCE_PACK_IMAGES)
+def test_bundled_reference_pack_images_are_complete(
+    relative_path: Path,
+):
+    path = Path(__file__).resolve().parents[1] / relative_path
+
+    with Image.open(path) as image:
+        image.load()
+        assert (image.format, image.mode, image.size) == (
+            "PNG",
+            "RGB",
+            (1280, 720),
+        )
 
 
 def test_video_validation_rejects_large_corrupt_and_truncated_mp4(tmp_path: Path):
@@ -173,7 +212,12 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
         write_png(sources["world"], "green")
 
         service = PipelineService(db, settings)
-        assets = service.save_reference_pack(episode, sources)
+        look = get_emma_look("emma-mint-pinafore-v1")
+        assets = service.save_reference_pack(
+            episode,
+            sources,
+            emma_look_id=look.id,
+        )
 
         assert service.reference_pack_complete(episode) is True
         assert [
@@ -182,13 +226,123 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
         ] == ["emma", "friends", "world"]
         assert [asset.variant for asset in assets] == [1, 2, 3]
         reference_images = service.reference_images(episode)
-        assert reference_images[0].name == "emma-character-sheet.png"
-        assert [
-            path.name.split("-")[1]
-            for path in reference_images[1:]
-        ] == ["friends", "world"]
+        assert reference_images == [Path(asset.path) for asset in assets]
+        assert reference_images[0] != look.reference_path
+        assert reference_images[0].parent == (
+            settings.upload_dir / episode.id
+        )
+        assert assets[0].metadata_json == {
+            "reference_role": "emma",
+            "reference_label": "Emma — reference ufficiale",
+            "emma_look_id": look.id,
+            "emma_look_catalog_version": CATALOG_VERSION,
+            "source_sha256": look.reference_sha256,
+        }
+        assert hashlib.sha256(look.reference_path.read_bytes()).hexdigest() == (
+            assets[0].metadata_json["source_sha256"]
+        )
+        assert episode.concept_json["emma_look_id"] == look.id
         assert all(asset.width == 1280 for asset in assets)
         assert all(asset.height == 720 for asset in assets)
+        for reference in reference_images:
+            with Image.open(reference) as image:
+                image.load()
+                assert (image.format, image.mode, image.size) == (
+                    "PNG",
+                    "RGB",
+                    (1280, 720),
+                )
+
+
+def test_different_episodes_freeze_different_selected_emma_bytes(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        first_episode = make_episode(75)
+        second_episode = make_episode(75)
+        second_episode.working_slug = "cucu-con-emma-secondo-look"
+        db.add_all([first_episode, second_episode])
+        db.commit()
+
+        sources = {
+            "emma": tmp_path / "untrusted-emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        write_png(sources["emma"], "black")
+        write_png(sources["friends"], "red")
+        write_png(sources["world"], "green")
+        first_look = get_emma_look("emma-classic-nuvibu-v1")
+        second_look = get_emma_look("emma-starry-bedtime-v1")
+        service = PipelineService(db, settings)
+
+        first_assets = service.save_reference_pack(
+            first_episode,
+            sources,
+            emma_look_id=first_look.id,
+        )
+        second_assets = service.save_reference_pack(
+            second_episode,
+            sources,
+            emma_look_id=second_look.id,
+        )
+
+        first_emma = Path(first_assets[0].path)
+        second_emma = Path(second_assets[0].path)
+        assert first_emma != second_emma
+        assert first_emma.parent == settings.upload_dir / first_episode.id
+        assert second_emma.parent == settings.upload_dir / second_episode.id
+        assert image_semantic_sha256(first_emma) != image_semantic_sha256(
+            second_emma
+        )
+        assert service.reference_images(first_episode)[0] == first_emma
+        assert service.reference_images(second_episode)[0] == second_emma
+        assert first_assets[0].metadata_json["emma_look_id"] == first_look.id
+        assert second_assets[0].metadata_json["emma_look_id"] == second_look.id
+        assert first_assets[0].metadata_json["source_sha256"] == (
+            first_look.reference_sha256
+        )
+        assert second_assets[0].metadata_json["source_sha256"] == (
+            second_look.reference_sha256
+        )
+
+
+def test_invalid_concept_emma_look_id_fails_closed(tmp_path: Path):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        episode.concept_json = {
+            "emma_look_id": "../../not-an-allowlisted-look"
+        }
+        db.add(episode)
+        db.commit()
+        sources = {
+            "emma": tmp_path / "emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        for path, color in zip(
+            sources.values(),
+            ("white", "red", "green"),
+            strict=True,
+        ):
+            write_png(path, color)
+        service = PipelineService(db, settings)
+
+        with pytest.raises(ValueError, match="Unknown Emma look ID"):
+            service.selected_emma_look_id(episode)
+        with pytest.raises(ValueError, match="Unknown Emma look ID"):
+            service.save_reference_pack(episode, sources)
+
+        assert db.scalars(
+            select(Asset).where(
+                Asset.episode_id == episode.id,
+                Asset.kind == AssetKind.CHARACTER_REFERENCE,
+            )
+        ).all() == []
 
 
 def test_legacy_cloud_pack_is_mapped_to_official_emma_reference(
@@ -231,7 +385,12 @@ def test_legacy_cloud_pack_is_mapped_to_official_emma_reference(
         service = PipelineService(db, settings)
         assert service.reference_pack_complete(episode) is True
         references = service.reference_images(episode)
-        assert references[0].name == "emma-character-sheet.png"
+        classic = get_emma_look(LEGACY_DEFAULT_LOOK_ID)
+        assert references[0] == classic.reference_path
+        assert hashlib.sha256(references[0].read_bytes()).hexdigest() == (
+            classic.reference_sha256
+        )
+        assert references[0] != old_cloud
         assert references[1:] == [old_friends, old_world]
 
 
@@ -277,6 +436,150 @@ def test_legacy_single_reference_can_be_adopted_as_friends(tmp_path: Path):
         ] == ["emma", "friends", "world"]
         assert not legacy_friends.exists()
         assert all(Path(asset.path).exists() for asset in assets)
+
+
+def test_emma_look_change_preserves_friends_and_world_semantics(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        sources = {
+            "emma": tmp_path / "untrusted-emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        write_png(sources["emma"], "black")
+        write_png(sources["friends"], "red")
+        write_png(sources["world"], "green")
+        first_look = get_emma_look("emma-classic-nuvibu-v1")
+        second_look = get_emma_look("emma-starry-bedtime-v1")
+        service = PipelineService(db, settings)
+        first_assets = service.save_reference_pack(
+            episode,
+            sources,
+            emma_look_id=first_look.id,
+        )
+        before_semantics = {
+            asset.metadata_json["reference_role"]: image_semantic_sha256(
+                Path(asset.path)
+            )
+            for asset in first_assets
+            if asset.metadata_json["reference_role"] in {"friends", "world"}
+        }
+        first_emma_semantics = image_semantic_sha256(
+            Path(first_assets[0].path)
+        )
+
+        selected_id = service.set_emma_look(episode, second_look.id)
+
+        changed_assets = service.reference_pack_assets(episode)
+        after_semantics = {
+            asset.metadata_json["reference_role"]: image_semantic_sha256(
+                Path(asset.path)
+            )
+            for asset in changed_assets
+            if asset.metadata_json["reference_role"] in {"friends", "world"}
+        }
+        assert selected_id == second_look.id
+        assert service.selected_emma_look_id(episode) == second_look.id
+        assert after_semantics == before_semantics
+        assert image_semantic_sha256(Path(changed_assets[0].path)) != (
+            first_emma_semantics
+        )
+        assert changed_assets[0].metadata_json["source_sha256"] == (
+            second_look.reference_sha256
+        )
+        assert service.reference_images(episode) == [
+            Path(asset.path) for asset in changed_assets
+        ]
+
+
+@pytest.mark.parametrize(
+    ("blocker", "error_type"),
+    [
+        ("active_job", ActiveJobError),
+        ("dependent_asset", ReferenceChangeConflictError),
+    ],
+)
+def test_emma_look_change_is_blocked_after_production_starts(
+    tmp_path: Path,
+    blocker: str,
+    error_type: type[Exception],
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        sources = {
+            "emma": tmp_path / "emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        write_png(sources["emma"], "white")
+        write_png(sources["friends"], "red")
+        write_png(sources["world"], "green")
+        first_look = get_emma_look("emma-classic-nuvibu-v1")
+        next_look = get_emma_look("emma-starry-bedtime-v1")
+        service = PipelineService(db, settings)
+        service.save_reference_pack(
+            episode,
+            sources,
+            emma_look_id=first_look.id,
+        )
+        before = [
+            (
+                asset.id,
+                asset.path,
+                dict(asset.metadata_json),
+                image_semantic_sha256(Path(asset.path)),
+            )
+            for asset in service.reference_pack_assets(episode)
+        ]
+
+        if blocker == "active_job":
+            db.add(
+                Job(
+                    episode=episode,
+                    job_type="pipeline",
+                    status=JobStatus.PENDING,
+                    payload_json={"through_step": "scenes"},
+                )
+            )
+        else:
+            dependent_path = tmp_path / "generated-scene.mp4"
+            dependent_path.write_bytes(b"already generated")
+            db.add(
+                Asset(
+                    episode=episode,
+                    kind=AssetKind.VIDEO_SCENE,
+                    provider="test",
+                    path=str(dependent_path),
+                    mime_type="video/mp4",
+                    selected=True,
+                )
+            )
+        db.commit()
+
+        with pytest.raises(error_type, match="Cannot replace"):
+            service.set_emma_look(episode, next_look.id)
+
+        after = [
+            (
+                asset.id,
+                asset.path,
+                dict(asset.metadata_json),
+                image_semantic_sha256(Path(asset.path)),
+            )
+            for asset in service.reference_pack_assets(episode)
+        ]
+        assert after == before
+        assert service.selected_emma_look_id(episode) == first_look.id
 
 
 def test_reference_change_preserves_dependent_outputs_and_spend(tmp_path: Path):

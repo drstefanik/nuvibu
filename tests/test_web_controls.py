@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from io import BytesIO
 from pathlib import Path
 
@@ -26,6 +27,217 @@ def _png_bytes(color: str) -> bytes:
     output = BytesIO()
     Image.new("RGB", (64, 64), color).save(output, "PNG")
     return output.getvalue()
+
+
+def _create_episode(client, title: str = "Look di Emma") -> str:
+    created = client.post(
+        "/episodes",
+        data={
+            "title": title,
+            "theme": "colori",
+            "hook": "Emma scopre un arcobaleno",
+            "target_words": "rosso, giallo, verde",
+            "featured_characters": "Emma, Nuvi la nuvola",
+            "age_min_months": "6",
+            "age_max_months": "24",
+            "duration_seconds": "75",
+            "bpm": "112",
+            "visual_pacing": "gentle",
+            "language": "it",
+        },
+        headers={"origin": "http://testserver"},
+        follow_redirects=False,
+    )
+    assert created.status_code == 303
+    return created.headers["location"]
+
+
+def _emma_look_buttons(html: str) -> list[str]:
+    return re.findall(
+        r'<button\s+class="emma-look-choice.*?</button>',
+        html,
+        flags=re.DOTALL,
+    )
+
+
+def test_episode_page_has_exactly_ten_clickable_emma_looks(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        episode_url = _create_episode(client)
+
+        detail = client.get(episode_url)
+
+        assert detail.status_code == 200
+        buttons = _emma_look_buttons(detail.text)
+        assert len(main_module.EMMA_LOOKS) == 10
+        assert len(buttons) == 10
+        assert all(" disabled" not in button for button in buttons)
+        assert detail.text.count('class="emma-look-form"') == 1
+        assert {look.id for look in main_module.EMMA_LOOKS} == {
+            re.search(r'data-emma-look-id="([^"]+)"', button).group(1)
+            for button in buttons
+        }
+        assert "Scegli il look di Emma" in detail.text
+        assert "type=\"file\" name=\"emma_file\"" not in detail.text
+        default_button = next(
+            button
+            for button in buttons
+            if (
+                f'data-emma-look-id="'
+                f'{main_module.NEW_EPISODE_DEFAULT_LOOK_ID}"'
+            ) in button
+        )
+        assert 'aria-pressed="true"' in default_button
+
+
+def test_selected_emma_look_persists_and_is_used_by_reference_form(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        episode_url = _create_episode(client)
+        selected = next(
+            look
+            for look in main_module.EMMA_LOOKS
+            if look.id != main_module.NEW_EPISODE_DEFAULT_LOOK_ID
+        )
+
+        changed = client.post(
+            f"{episode_url}/emma-look",
+            data={"emma_look_id": selected.id},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert changed.status_code == 303
+        assert changed.headers["location"] == (
+            f"{episode_url}#character-reference"
+        )
+        detail = client.get(episode_url)
+        selected_button = next(
+            button
+            for button in _emma_look_buttons(detail.text)
+            if f'data-emma-look-id="{selected.id}"' in button
+        )
+        assert 'aria-pressed="true"' in selected_button
+        assert "emma-look-choice-selected" in selected_button
+        assert "Selezionato" in selected_button
+        assert selected.thumbnail_url in detail.text
+
+        persisted = client.get(episode_url)
+        persisted_button = next(
+            button
+            for button in _emma_look_buttons(persisted.text)
+            if f'data-emma-look-id="{selected.id}"' in button
+        )
+        assert 'aria-pressed="true"' in persisted_button
+
+        original_has_valid_asset = (
+            main_module.PipelineService.has_valid_asset
+        )
+        original_content_is_approved = (
+            main_module.PipelineService.content_is_approved
+        )
+        monkeypatch.setattr(
+            main_module.PipelineService,
+            "has_valid_asset",
+            lambda service, episode, kind: (
+                True
+                if kind == main_module.AssetKind.MUSIC
+                else original_has_valid_asset(service, episode, kind)
+            ),
+        )
+        monkeypatch.setattr(
+            main_module.PipelineService,
+            "content_is_approved",
+            lambda service, episode, content_kind: (
+                True
+                if content_kind == "storyboard"
+                else original_content_is_approved(
+                    service,
+                    episode,
+                    content_kind,
+                )
+            ),
+        )
+        editable_detail = client.get(episode_url)
+        assert (
+            f'<input type="hidden" name="emma_look_id" '
+            f'value="{selected.id}">'
+        ) in editable_detail.text
+
+
+def test_invalid_emma_look_id_is_rejected(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        episode_url = _create_episode(client)
+
+        rejected = client.post(
+            f"{episode_url}/emma-look",
+            data={"emma_look_id": "not-in-the-official-catalog"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert rejected.status_code == 400
+        assert rejected.json()["detail"] == "Invalid Emma look"
+        detail = client.get(episode_url)
+        default_button = next(
+            button
+            for button in _emma_look_buttons(detail.text)
+            if (
+                f'data-emma-look-id="'
+                f'{main_module.NEW_EPISODE_DEFAULT_LOOK_ID}"'
+            ) in button
+        )
+        assert 'aria-pressed="true"' in default_button
+
+
+def test_emma_look_controls_are_disabled_and_post_conflicts_when_locked(
+    tmp_path: Path,
+    monkeypatch,
+):
+    def reject_locked_change(_service, _episode, _look_id):
+        raise main_module.ReferenceChangeConflictError(
+            "Emma look is locked",
+        )
+
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        episode_url = _create_episode(client)
+        monkeypatch.setattr(
+            main_module.PipelineService,
+            "reference_pack_mutable",
+            lambda _service, _episode: False,
+        )
+        monkeypatch.setattr(
+            main_module.PipelineService,
+            "set_emma_look",
+            reject_locked_change,
+        )
+
+        detail = client.get(episode_url)
+        buttons = _emma_look_buttons(detail.text)
+        assert len(buttons) == 10
+        assert all(" disabled" in button for button in buttons)
+        assert all('aria-disabled="true"' in button for button in buttons)
+        assert "Il look è bloccato" in detail.text
+
+        rejected = client.post(
+            f"{episode_url}/emma-look",
+            data={"emma_look_id": main_module.EMMA_LOOKS[1].id},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert rejected.status_code == 409
+        assert rejected.json()["detail"] == "Emma look is locked"
 
 
 def test_reference_pack_upload_requires_and_displays_all_three_slots(

@@ -9,7 +9,12 @@ Data: 29 luglio 2026
 - aggiunta la reference ufficiale di Emma ricavata dalle fotografie approvate;
 - mantenuta la nuvola Nuvi come spalla visivamente secondaria;
 - rigenerati key art, avatar e banner YouTube nella nuova gerarchia;
-- aggiornata la Character Bible con volto, ciuffo, proporzioni e T-shirt `nuvibu` immutabili;
+- aggiornata la Character Bible: volto, occhi, capelli, ciuffo e proporzioni di Emma sono immutabili;
+- introdotto il catalogo chiuso di dieci look ufficiali precaricati, senza upload arbitrari della reference di Emma;
+- aggiunta la selezione tramite anteprime cliccabili: un solo look viene salvato e bloccato per l’intero episodio;
+- impostato **Rosa confetto** come default dei nuovi episodi e **Classico Nuvibù** come fallback degli episodi precedenti privi di selezione;
+- la copia specifica del look salvata con l’episodio viene inviata a Veo come immagine 1;
+- il deploy Cloud Run rifiuta worktree non committati, usa il commit completo come tag immutabile e verifica l’hash di una thumbnail Emma dopo il rilascio;
 - aggiornati i prompt Veo e la mapping delle reference: Emma, amici, mondo;
 - preservata la compatibilità con i vecchi ruoli reference `nuvibu` e `cast`;
 - la modalità mock usa concept approvati invece di facce geometriche;

@@ -20,6 +20,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..config import Settings
+from ..emma_looks import (
+    CATALOG_VERSION as EMMA_LOOK_CATALOG_VERSION,
+    LEGACY_DEFAULT_LOOK_ID,
+    EmmaLook,
+    get_emma_look,
+)
 from ..media import is_valid_video, music_arrangement_quality
 from ..models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus
 from ..providers import get_music_provider, get_video_provider
@@ -27,7 +33,7 @@ from ..providers.base import MusicProvider, MusicResult, VideoProvider, VideoRes
 from ..providers.elevenlabs import music_receipt_path, music_request_fingerprint
 from ..providers.veo import veo_price_per_second
 from .prompts import (
-    EMMA_VISUAL_GUARD,
+    emma_visual_guard,
     generate_lyrics,
     generate_storyboard,
     music_prompt,
@@ -48,12 +54,7 @@ LEGACY_REFERENCE_ROLE_ALIASES = {
     "nuvibu": "emma",
     "cast": "friends",
 }
-OFFICIAL_EMMA_REFERENCE = (
-    Path(__file__).resolve().parents[2]
-    / "brand"
-    / "source"
-    / "emma-character-sheet.png"
-)
+EMMA_LOOK_ID_KEY = "emma_look_id"
 REFERENCE_DEPENDENT_ASSET_KINDS = {
     AssetKind.VIDEO_SCENE,
     AssetKind.RENDER,
@@ -1338,11 +1339,25 @@ class PipelineService:
 
     @staticmethod
     def official_emma_reference() -> Path:
-        if not OFFICIAL_EMMA_REFERENCE.is_file():
-            raise FileNotFoundError(
-                f"Official Emma reference missing: {OFFICIAL_EMMA_REFERENCE}"
-            )
-        return OFFICIAL_EMMA_REFERENCE
+        """Return the deterministic classic reference for legacy callers."""
+
+        return get_emma_look(LEGACY_DEFAULT_LOOK_ID).reference_path
+
+    def selected_emma_look_id(self, episode: Episode) -> str:
+        """Resolve a pinned look, falling back only for pre-catalog episodes."""
+
+        stored = (episode.concept_json or {}).get(EMMA_LOOK_ID_KEY)
+        if stored is not None:
+            return get_emma_look(str(stored)).id
+        for asset in self.reference_pack_assets(episode):
+            raw_role = str((asset.metadata_json or {}).get("reference_role", ""))
+            look_id = (asset.metadata_json or {}).get(EMMA_LOOK_ID_KEY)
+            if raw_role == "emma" and look_id is not None:
+                return get_emma_look(str(look_id)).id
+        return LEGACY_DEFAULT_LOOK_ID
+
+    def selected_emma_look(self, episode: Episode) -> EmmaLook:
+        return get_emma_look(self.selected_emma_look_id(episode))
 
     def reference_pack_assets(self, episode: Episode) -> list[Asset]:
         selected = [
@@ -1389,7 +1404,24 @@ class PipelineService:
             references: list[Path] = []
             for role in REFERENCE_ROLE_ORDER:
                 if role == "emma":
-                    references.append(self.official_emma_reference())
+                    emma_asset = assets.get(role)
+                    raw_role = (
+                        str(
+                            (emma_asset.metadata_json or {}).get(
+                                "reference_role",
+                                "",
+                            )
+                        )
+                        if emma_asset is not None
+                        else ""
+                    )
+                    # Old packs used `nuvibu` for a cloud/hero image. Never
+                    # send that retired image as Emma. Explicit `emma` rows,
+                    # however, are frozen episode copies and must be honored.
+                    if emma_asset is not None and raw_role == "emma":
+                        references.append(Path(emma_asset.path))
+                    else:
+                        references.append(self.official_emma_reference())
                     continue
                 asset = assets.get(role)
                 if asset is not None:
@@ -1431,6 +1463,46 @@ class PipelineService:
             return False
         render_dir = self.settings.render_dir / episode.id
         return not (render_dir.is_dir() and any(render_dir.iterdir()))
+
+    def set_emma_look(self, episode: Episode, look_id: str) -> str:
+        """Pin one allowlisted look and freeze its bytes when a pack exists."""
+
+        look = get_emma_look(look_id)
+        self._lock_episode(episode)
+        active_job = self.active_job(episode)
+        if active_job is not None:
+            self.db.rollback()
+            raise ActiveJobError(
+                f"Cannot replace Emma's look while job {active_job.id} "
+                f"is {active_job.status.value}"
+            )
+        if not self.reference_pack_mutable(episode):
+            self.db.rollback()
+            raise ReferenceChangeConflictError(
+                "Cannot replace Emma's look after reference-dependent "
+                "production has started"
+            )
+        assets = {
+            self.explicit_reference_role(asset): asset
+            for asset in self.reference_pack_assets(episode)
+        }
+        if set(assets) == set(REFERENCE_ROLE_ORDER):
+            self.save_reference_pack(
+                episode,
+                {
+                    "emma": look.reference_path,
+                    "friends": Path(assets["friends"].path),
+                    "world": Path(assets["world"].path),
+                },
+                emma_look_id=look.id,
+            )
+            return look.id
+
+        concept = dict(episode.concept_json or {})
+        concept[EMMA_LOOK_ID_KEY] = look.id
+        episode.concept_json = concept
+        self.db.commit()
+        return look.id
 
     def _lock_episode(self, episode: Episode) -> None:
         locked_id = self.db.scalar(
@@ -1616,6 +1688,8 @@ class PipelineService:
         self,
         episode: Episode,
         sources: dict[str, Path],
+        *,
+        emma_look: EmmaLook | None = None,
     ) -> list[Asset]:
         if not sources or any(role not in REFERENCE_ROLE_ORDER for role in sources):
             raise ValueError("Unknown or empty reference role set")
@@ -1702,6 +1776,24 @@ class PipelineService:
             for target in targets:
                 self.db.delete(target)
             self.db.flush()
+
+            def reference_metadata(role: str) -> dict[str, object]:
+                metadata: dict[str, object] = {
+                    "reference_role": role,
+                    "reference_label": REFERENCE_ROLE_LABELS[role],
+                }
+                if role == "emma" and emma_look is not None:
+                    metadata.update(
+                        {
+                            EMMA_LOOK_ID_KEY: emma_look.id,
+                            "emma_look_catalog_version": (
+                                EMMA_LOOK_CATALOG_VERSION
+                            ),
+                            "source_sha256": emma_look.reference_sha256,
+                        }
+                    )
+                return metadata
+
             assets = [
                 self._asset(
                     episode,
@@ -1713,14 +1805,15 @@ class PipelineService:
                     selected=True,
                     width=1280,
                     height=720,
-                    metadata={
-                        "reference_role": role,
-                        "reference_label": REFERENCE_ROLE_LABELS[role],
-                    },
+                    metadata=reference_metadata(role),
                 )
                 for index, role in enumerate(REFERENCE_ROLE_ORDER, start=1)
                 if role in destinations
             ]
+            if emma_look is not None:
+                concept = dict(episode.concept_json or {})
+                concept[EMMA_LOOK_ID_KEY] = emma_look.id
+                episode.concept_json = concept
             episode.status = self._status_after_reference_change(episode)
             self._update_actual_cost(episode)
             self.db.commit()
@@ -1745,6 +1838,8 @@ class PipelineService:
         self,
         episode: Episode,
         sources: dict[str, Path],
+        *,
+        emma_look_id: str | None = None,
     ) -> list[Asset]:
         if set(sources) != set(REFERENCE_ROLE_ORDER):
             missing = ", ".join(
@@ -1753,7 +1848,17 @@ class PipelineService:
                 if role not in sources
             )
             raise ValueError(f"Reference pack incomplete: {missing}")
-        return self._save_reference_sources(episode, sources)
+        look = get_emma_look(
+            emma_look_id or self.selected_emma_look_id(episode)
+        )
+        trusted_sources = dict(sources)
+        # Emma can only originate from the validated, bundled catalog.
+        trusted_sources["emma"] = look.reference_path
+        return self._save_reference_sources(
+            episode,
+            trusted_sources,
+            emma_look=look,
+        )
 
     def save_character_reference(self, episode: Episode, source: Path) -> Asset:
         """Store one legacy subject reference for older callers and tests."""
@@ -1779,6 +1884,13 @@ class PipelineService:
                 "A valid selected character reference is required before "
                 "starting Veo"
             )
+        selected_look = self.selected_emma_look(episode)
+        locked_emma_guard = emma_visual_guard(selected_look.outfit_prompt)
+        emma_reference_sha256 = (
+            hashlib.sha256(references[0].read_bytes()).hexdigest()
+            if references
+            else None
+        )
         self.assert_budget(episode)
         self.assert_daily_budget(
             self._estimate_video_cost(episode, remaining_only=True),
@@ -1841,7 +1953,7 @@ class PipelineService:
                             prompt=(
                                 scene["prompt"]
                                 + "\nNon-negotiable series rule: "
-                                + EMMA_VISUAL_GUARD
+                                + locked_emma_guard
                                 + reference_context
                             ),
                             duration_seconds=int(scene["duration_seconds"]),
@@ -1856,6 +1968,14 @@ class PipelineService:
                         last_error = exc
                 if result is None:
                     raise RuntimeError(f"Scene {index} failed after retries: {last_error}") from last_error
+            result.metadata["emma_look_id"] = selected_look.id
+            result.metadata["emma_look_catalog_version"] = (
+                EMMA_LOOK_CATALOG_VERSION
+            )
+            if emma_reference_sha256 is not None:
+                result.metadata["emma_reference_sha256"] = (
+                    emma_reference_sha256
+                )
             with self._daily_budget_lock():
                 self._asset(
                     episode, kind=AssetKind.VIDEO_SCENE, path=result.path, mime_type="video/mp4", provider=result.provider,
