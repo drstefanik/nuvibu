@@ -131,12 +131,13 @@ MAX_SCENE_RETRIES=0
 ```
 
 La pipeline interrompe il job quando la stima supera il tetto per episodio o
-quello giornaliero. Per il pilota Cloud Run imposta un massimo di 30 secondi,
-10 USD per episodio e 10 USD al giorno. Musica e render partono soltanto dopo
-una conferma esplicita nella console. I costi registrati vanno riconciliati con
-i pannelli dei provider. Il limite giornaliero comprende anche la spesa
-prenotata dai job attivi; un esito provider ambiguo conserva job e prenotazione
-finché la stessa operazione non viene ripresa o riconciliata.
+quello giornaliero. Cloud Run consente episodi fino a 180 secondi e mantiene un
+tetto di 40 USD per episodio e 40 USD al giorno. Il formato editoriale
+consigliato parte da 75 secondi. Musica e render partono soltanto dopo una
+conferma esplicita nella console. I costi registrati vanno riconciliati con i
+pannelli dei provider. Il limite giornaliero comprende anche la spesa prenotata
+dai job attivi; un esito provider ambiguo conserva job e prenotazione finché la
+stessa operazione non viene ripresa o riconciliata.
 
 ## Collegare YouTube
 
