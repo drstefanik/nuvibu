@@ -10,7 +10,7 @@ from app.database import Base
 from app.models import Episode, MetricSnapshot
 from app.services.growth import calculate_growth_score
 from app.services.pipeline import PipelineService, slugify
-from app.services.prompts import generate_storyboard
+from app.services.prompts import generate_lyrics, generate_storyboard, lyric_sections
 from app.services.safety import review_text
 
 
@@ -37,10 +37,33 @@ def test_slugify_handles_accents_and_symbols():
 
 def test_storyboard_covers_duration_without_fast_scene():
     episode = make_episode(75)
+    episode.lyrics_text = generate_lyrics(episode)
     scenes = generate_storyboard(episode)
     assert sum(scene["duration_seconds"] for scene in scenes) == 75
     assert min(scene["duration_seconds"] for scene in scenes) >= 4
     assert all("no flashing" in scene["prompt"] for scene in scenes)
+    assert all(scene["lyric_cue"] for scene in scenes)
+    assert all(scene["lyric_cue"] in episode.lyrics_text for scene in scenes)
+    assert "Episode story:" in scenes[0]["prompt"]
+
+
+def test_rainbow_chicks_lyrics_are_coherent_and_duration_aware():
+    episode = make_episode(75)
+    episode.title = "Pulcini Arcobaleno"
+    episode.theme = "colori e trasformazioni"
+    episode.hook = "Sette pulcini saltano in pozze magiche e cambiano colore"
+    episode.target_words = ["arcobaleno"]
+    episode.featured_characters = ["Nuvibù", "Pulcini Arcobaleno"]
+    episode.bpm = 112
+
+    lyrics = generate_lyrics(episode)
+    sections = lyric_sections(lyrics)
+
+    assert len(sections) == 6
+    assert "Sette pulcini, eccoli qua!" in lyrics
+    assert "Arcobaleno sorride" not in lyrics
+    assert "arcobaleno insieme a Nuvibù!" in lyrics
+    assert all(lines for _name, lines in sections)
 
 
 def test_safety_blocks_risky_terms():
