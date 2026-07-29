@@ -36,6 +36,23 @@
 .reference-card-heading strong{font-size:13px}
 .reference-card .reference-preview{height:145px;object-fit:cover;margin-top:12px}
 .reference-placeholder{height:145px;margin-top:12px;border:1px dashed #cfd4df;border-radius:14px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:12px;padding:12px;background:#f4f5fa}
+.reference-error{margin:16px 0 0}
+.reference-preset-picker{margin-top:18px;padding:18px;border:1px solid #dcd4ef;border-radius:18px;background:linear-gradient(135deg,#faf8ff,#f5fbff)}
+.reference-preset-heading strong{font-size:17px;letter-spacing:-.015em}
+.reference-preset-heading p{margin:5px 0 15px;color:var(--muted);font-size:13px;line-height:1.5}
+.reference-preset-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.reference-preset-card{position:relative;display:flex;min-width:0;flex-direction:column;padding:14px;border:2px solid transparent;border-radius:16px;background:#fff;box-shadow:0 4px 15px rgba(42,31,72,.07)}
+.reference-preset-recommended{border-color:#bfa4e9;box-shadow:0 0 0 3px rgba(122,66,216,.08)}
+.reference-preset-selected{border-color:#79c7aa;box-shadow:0 0 0 3px rgba(21,148,109,.09)}
+.reference-preset-title{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.reference-preset-title>strong{font-size:14px}
+.reference-preset-images{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin-top:11px}
+.reference-preset-images img{display:block;width:100%;aspect-ratio:16/9;border:1px solid var(--line);border-radius:10px;object-fit:cover;background:#f0edf7}
+.reference-preset-card>p{flex:1;margin:10px 0 12px;color:var(--muted);font-size:12px;line-height:1.45}
+.reference-preset-card .button{align-self:flex-end;min-width:150px}
+.reference-custom-heading{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin:20px 2px 0}
+.reference-custom-heading>strong{font-size:14px}
+.reference-custom-heading>small{color:var(--muted);font-size:11px}
 .reference-upload-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;margin-top:18px;padding:16px;border:1px solid #dcd4ef;border-radius:16px;background:#fff}
 .reference-upload-form label{display:flex;flex-direction:column}
 .reference-upload-form label small{display:block;min-height:34px;margin-top:4px;line-height:1.35}
@@ -94,7 +111,9 @@
   .music-regeneration{grid-template-columns:1fr}
   .emma-look-form{padding:14px}
   .emma-look-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
-  .reference-grid,.reference-upload-form{grid-template-columns:1fr}
+  .reference-grid,.reference-preset-grid,.reference-upload-form{grid-template-columns:1fr}
+  .reference-custom-heading{display:block}
+  .reference-custom-heading>small{display:block;margin-top:4px}
   .legacy-reference{grid-template-columns:1fr}
   .reference-upload-form label small{min-height:0}
   .reference-upload-form .button{justify-self:stretch}

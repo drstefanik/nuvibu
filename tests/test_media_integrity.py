@@ -234,6 +234,9 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
         assert assets[0].metadata_json == {
             "reference_role": "emma",
             "reference_label": "Emma — reference ufficiale",
+            "stored_sha256": hashlib.sha256(
+                Path(assets[0].path).read_bytes()
+            ).hexdigest(),
             "emma_look_id": look.id,
             "emma_look_catalog_version": CATALOG_VERSION,
             "source_sha256": look.reference_sha256,
@@ -244,6 +247,11 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
         assert episode.concept_json["emma_look_id"] == look.id
         assert all(asset.width == 1280 for asset in assets)
         assert all(asset.height == 720 for asset in assets)
+        assert all(
+            asset.metadata_json["stored_sha256"]
+            == hashlib.sha256(Path(asset.path).read_bytes()).hexdigest()
+            for asset in assets
+        )
         for reference in reference_images:
             with Image.open(reference) as image:
                 image.load()
@@ -252,6 +260,48 @@ def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
                     "RGB",
                     (1280, 720),
                 )
+
+
+def test_valid_but_replaced_reference_fails_the_stored_digest(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        sources = {
+            "emma": tmp_path / "emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        for path, color in zip(
+            sources.values(),
+            ("white", "red", "green"),
+            strict=True,
+        ):
+            write_png(path, color)
+        assets = PipelineService(db, settings).save_reference_pack(
+            episode,
+            sources,
+        )
+        world_asset = next(
+            asset
+            for asset in assets
+            if asset.metadata_json["reference_role"] == "world"
+        )
+        Image.new("RGB", (1280, 720), "purple").save(
+            world_asset.path,
+            "PNG",
+        )
+        service = PipelineService(db, settings)
+
+        assert service.reference_pack_complete(episode) is False
+        assert {
+            service.explicit_reference_role(asset)
+            for asset in service.reference_pack_assets(episode)
+        } == {"emma", "friends"}
 
 
 def test_different_episodes_freeze_different_selected_emma_bytes(
@@ -496,6 +546,79 @@ def test_emma_look_change_preserves_friends_and_world_semantics(
         assert service.reference_images(episode) == [
             Path(asset.path) for asset in changed_assets
         ]
+
+
+def test_storage_copy_failure_preserves_previous_reference_pack(
+    tmp_path: Path,
+    monkeypatch,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        original_sources = {
+            "emma": tmp_path / "emma.png",
+            "friends": tmp_path / "friends.png",
+            "world": tmp_path / "world.png",
+        }
+        replacement_sources = {
+            "emma": tmp_path / "emma-new.png",
+            "friends": tmp_path / "friends-new.png",
+            "world": tmp_path / "world-new.png",
+        }
+        for path, color in zip(
+            original_sources.values(),
+            ("white", "red", "green"),
+            strict=True,
+        ):
+            write_png(path, color)
+        for path, color in zip(
+            replacement_sources.values(),
+            ("white", "blue", "yellow"),
+            strict=True,
+        ):
+            write_png(path, color)
+        service = PipelineService(db, settings)
+        original_assets = service.save_reference_pack(
+            episode,
+            original_sources,
+        )
+        original_ids = [asset.id for asset in original_assets]
+        original_files = {
+            Path(asset.path): Path(asset.path).read_bytes()
+            for asset in original_assets
+        }
+        original_copy = service._copy_completed_file
+        copy_calls = 0
+
+        def fail_on_second_copy(source: Path, destination: Path) -> None:
+            nonlocal copy_calls
+            copy_calls += 1
+            if copy_calls == 2:
+                raise RuntimeError("injected GCS copy failure")
+            original_copy(source, destination)
+
+        monkeypatch.setattr(
+            service,
+            "_copy_completed_file",
+            fail_on_second_copy,
+        )
+
+        with pytest.raises(RuntimeError, match="injected GCS copy failure"):
+            service.save_reference_pack(episode, replacement_sources)
+
+        db.expire_all()
+        preserved = service.reference_pack_assets(episode)
+        assert [asset.id for asset in preserved] == original_ids
+        assert {
+            Path(asset.path): Path(asset.path).read_bytes()
+            for asset in preserved
+        } == original_files
+        assert set(settings.upload_dir.rglob("reference-*.png")) == set(
+            original_files
+        )
 
 
 @pytest.mark.parametrize(

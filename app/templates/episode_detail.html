@@ -327,6 +327,9 @@
     {% if has_reference %}<span class="status status-approved">3/3 completo</span>{% else %}<span class="status">{{ 1 + (1 if reference_assets.get('friends') else 0) + (1 if reference_assets.get('world') else 0) }}/3</span>{% endif %}
   </div>
   <p class="muted">Veo riceverà sempre, nello stesso ordine, Emma, gli amici selezionati e il mondo dell’episodio. Emma resta la protagonista di ogni scena; la nuvola e gli altri personaggi sono i suoi compagni.</p>
+  {% if reference_error %}
+  <p class="inline-error reference-error" role="alert">{{ reference_error }}</p>
+  {% endif %}
 
   <form class="emma-look-form" action="/episodes/{{ episode.id }}/emma-look" method="post">
     <fieldset>
@@ -390,6 +393,38 @@
   {% if active_job %}
   <p class="locked-note">Il reference pack non può essere modificato mentre il worker è attivo.</p>
   {% elif reference_pack_mutable and has_music and storyboard_approved %}
+  <div class="reference-preset-picker">
+    <div class="reference-preset-heading">
+      <div>
+        <strong>Reference pack precaricati</strong>
+        <p>Scegli un pack verificato: il server userà direttamente le immagini originali, senza ricaricarle dal computer.</p>
+      </div>
+    </div>
+    <div class="reference-preset-grid">
+      {% for preset in reference_presets %}
+      {% set is_recommended = preset.id == recommended_reference_preset_id %}
+      {% set is_selected = preset.id == selected_reference_preset_id %}
+      <form class="reference-preset-card{% if is_recommended %} reference-preset-recommended{% endif %}{% if is_selected %} reference-preset-selected{% endif %}" action="/episodes/{{ episode.id }}/reference-preset" method="post">
+        <input type="hidden" name="emma_look_id" value="{{ selected_emma_look_id }}">
+        <input type="hidden" name="reference_preset_id" value="{{ preset.id }}">
+        <div class="reference-preset-title">
+          <strong>{{ preset.display_name }}</strong>
+          {% if is_selected %}<span class="status status-approved">in uso</span>{% elif is_recommended %}<span class="status">consigliato</span>{% endif %}
+        </div>
+        <div class="reference-preset-images">
+          <img src="{{ preset.image_url('friends') }}" alt="Amici — {{ preset.display_name }}">
+          <img src="{{ preset.image_url('world') }}" alt="Mondo — {{ preset.display_name }}">
+        </div>
+        <p>{{ preset.description }}</p>
+        <button class="button{% if is_selected %} button-success{% elif is_recommended %} button-primary{% endif %}" type="submit">{% if is_selected %}Reimposta questo pack{% else %}Usa questo pack{% endif %}</button>
+      </form>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="reference-custom-heading">
+    <strong>Oppure carica un pack personalizzato</strong>
+    <small>Usa questa opzione soltanto per immagini diverse dai preset.</small>
+  </div>
   <form class="reference-upload-form" action="/episodes/{{ episode.id }}/reference" method="post" enctype="multipart/form-data">
     <input type="hidden" name="emma_look_id" value="{{ selected_emma_look_id }}">
     {% if legacy_reference %}

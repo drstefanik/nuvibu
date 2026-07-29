@@ -310,7 +310,22 @@ gcloud run services update "${WEB_SERVICE}" \
   --region "${RUN_REGION}" \
   --update-env-vars "APP_BASE_URL=${SERVICE_URL}" >/dev/null
 
-curl --fail --silent --show-error "${SERVICE_URL}/health" >/dev/null
+HEALTH_JSON="$(
+  curl --fail --silent --show-error "${SERVICE_URL}/health"
+)"
+if ! python3 -c '
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+expected = {"la-fattoria-v1", "nanna-arcobaleno-v1"}
+actual = set(payload.get("reference_presets", []))
+if payload.get("status") != "ok" or actual != expected:
+    raise SystemExit(1)
+' "${HEALTH_JSON}"; then
+  echo "Reference preset health smoke test failed for ${SERVICE_URL}" >&2
+  exit 1
+fi
 curl --fail --silent --show-error "${SERVICE_URL}/readyz" >/dev/null
 LOGIN_PAGE="$(curl --fail --silent --show-error "${SERVICE_URL}/login")"
 if [[ "${LOGIN_PAGE}" != *"Accedi allo studio"* ]]; then

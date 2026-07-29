@@ -32,6 +32,13 @@ from .emma_looks import (
 )
 from .models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus, MetricSnapshot, PublishRecord
 from .providers.youtube import YouTubeClient
+from .reference_presets import (
+    REFERENCE_PRESET_ROLES,
+    REFERENCE_PRESETS,
+    ReferencePresetCatalogError,
+    get_reference_preset,
+    recommend_reference_preset_id,
+)
 from .schemas import EpisodeCreate, MetricCreate, PipelineRequest
 from .services.analytics import sync_youtube_metrics
 from .services.growth import calculate_growth_score, latest_metric
@@ -256,7 +263,14 @@ def grouped_assets(episode: Episode) -> dict[str, list[Asset]]:
 @app.get("/health")
 @app.get("/healthz")
 def health() -> dict:
-    return {"status": "ok", "provider_mode": settings.provider_mode, "app": settings.app_name}
+    return {
+        "status": "ok",
+        "provider_mode": settings.provider_mode,
+        "app": settings.app_name,
+        "reference_presets": [
+            preset.id for preset in REFERENCE_PRESETS
+        ],
+    }
 
 
 @app.get("/readyz")
@@ -734,7 +748,12 @@ def create_episode_api(payload: EpisodeCreate, db: Session = Depends(get_db)):
 
 
 @app.get("/episodes/{episode_id}", response_class=HTMLResponse)
-def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_db)):
+def episode_detail(
+    request: Request,
+    episode_id: str,
+    reference_error: str | None = None,
+    db: Session = Depends(get_db),
+):
     episode = get_episode_or_404(db, episode_id)
     service = PipelineService(db, settings)
     estimated_cost = service.estimate_cost(episode)
@@ -763,9 +782,34 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
         service.explicit_reference_role(asset): asset
         for asset in service.reference_pack_assets(episode)
     }
+    reference_preset_ids = [
+        (reference_assets[role].metadata_json or {}).get(
+            "reference_preset_id"
+        )
+        for role in ("friends", "world")
+        if role in reference_assets
+    ]
+    selected_reference_preset_id = (
+        str(reference_preset_ids[0])
+        if len(reference_preset_ids) == 2
+        and reference_preset_ids[0] is not None
+        and reference_preset_ids[0] == reference_preset_ids[1]
+        else None
+    )
     legacy_reference = service.legacy_reference_asset(episode)
     selected_emma_look_id = service.selected_emma_look_id(episode)
     selected_emma_look = service.selected_emma_look(episode)
+    recommended_reference_preset_id = recommend_reference_preset_id(
+        (
+            episode.title,
+            episode.theme,
+            episode.hook,
+            episode.target_words,
+            episode.featured_characters,
+            episode.lyrics_text,
+            episode.storyboard_json,
+        )
+    )
     return templates.TemplateResponse(
         request, "episode_detail.html",
         {
@@ -808,6 +852,16 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
             "emma_looks": EMMA_LOOKS,
             "selected_emma_look_id": selected_emma_look_id,
             "selected_emma_look": selected_emma_look,
+            "reference_presets": REFERENCE_PRESETS,
+            "selected_reference_preset_id": (
+                selected_reference_preset_id
+            ),
+            "reference_error": (
+                reference_error[:400] if reference_error else None
+            ),
+            "recommended_reference_preset_id": (
+                recommended_reference_preset_id
+            ),
             "has_qc": service.has_valid_asset(
                 episode,
                 AssetKind.REPORT,
@@ -1022,6 +1076,106 @@ def select_emma_look(
     )
 
 
+def reference_form_redirect(
+    episode_id: str,
+    *,
+    error: str | None = None,
+) -> RedirectResponse:
+    target = f"/episodes/{episode_id}"
+    if error:
+        target = f"{target}?reference_error={quote(error, safe='')}"
+    return RedirectResponse(
+        f"{target}#character-reference",
+        status_code=303,
+    )
+
+
+@app.get("/reference-presets/{preset_id}/{role}")
+def reference_preset_image(preset_id: str, role: str):
+    try:
+        preset = get_reference_preset(preset_id)
+        if role not in REFERENCE_PRESET_ROLES:
+            raise ValueError(f"Unknown reference preset role: {role!r}")
+        path = preset.validated_path_for(role)
+    except (ValueError, ReferencePresetCatalogError) as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="Reference preset image not found",
+        ) from exc
+    return FileResponse(
+        path,
+        media_type="image/png",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
+
+
+@app.post("/episodes/{episode_id}/reference-preset")
+def use_reference_preset(
+    episode_id: str,
+    reference_preset_id: str = Form(...),
+    emma_look_id: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    service = PipelineService(db, settings)
+    try:
+        preset = get_reference_preset(reference_preset_id)
+    except ValueError:
+        return reference_form_redirect(
+            episode.id,
+            error="Il reference pack selezionato non è valido.",
+        )
+    selected_emma_look_id = (
+        emma_look_id or service.selected_emma_look_id(episode)
+    )
+    if selected_emma_look_id not in {look.id for look in EMMA_LOOKS}:
+        return reference_form_redirect(
+            episode.id,
+            error="Il look di Emma selezionato non è valido.",
+        )
+    try:
+        sources = {
+            "emma": service.selected_emma_look(episode).reference_path,
+            **preset.sources,
+        }
+        service.save_reference_pack(
+            episode,
+            sources,
+            emma_look_id=selected_emma_look_id,
+            source_metadata={
+                "friends": {
+                    "reference_preset_id": preset.id,
+                    "source_sha256": preset.friends_sha256,
+                },
+                "world": {
+                    "reference_preset_id": preset.id,
+                    "source_sha256": preset.world_sha256,
+                },
+            },
+        )
+    except ReferencePresetCatalogError:
+        return reference_form_redirect(
+            episode.id,
+            error=(
+                "Il reference pack precaricato non è disponibile. "
+                "Ridistribuisci la versione verificata."
+            ),
+        )
+    except ReferenceChangeConflictError as exc:
+        return reference_form_redirect(
+            episode.id,
+            error=str(exc),
+        )
+    except (OSError, ValueError) as exc:
+        return reference_form_redirect(
+            episode.id,
+            error=f"Reference pack non valido: {exc}",
+        )
+    return reference_form_redirect(
+        episode.id,
+    )
+
+
 @app.post("/episodes/{episode_id}/reference")
 def upload_reference_pack(
     episode_id: str,
@@ -1131,10 +1285,18 @@ def upload_reference_pack(
                 status_code=400,
                 detail=f"Invalid reference pack: {exc}",
             ) from exc
+    except HTTPException as exc:
+        return reference_form_redirect(
+            episode.id,
+            error=str(exc.detail),
+        )
     finally:
         for temporary_path in temporary_paths.values():
-            temporary_path.unlink(missing_ok=True)
-    return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+    return reference_form_redirect(episode.id)
 
 
 @app.post("/episodes/{episode_id}/approve")

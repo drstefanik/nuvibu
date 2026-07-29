@@ -9,12 +9,13 @@ import tempfile
 import threading
 import time
 import uuid
+import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
-from PIL import Image, ImageOps
+from PIL import Image, ImageOps, UnidentifiedImageError
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -50,6 +51,9 @@ REFERENCE_ROLE_LABELS = {
     "friends": "Amici dell’episodio",
     "world": "Mondo dell’episodio",
 }
+REFERENCE_ALLOWED_IMAGE_FORMATS = {"PNG", "JPEG", "WEBP"}
+REFERENCE_MAX_IMAGE_DIMENSION = 8192
+REFERENCE_MAX_IMAGE_PIXELS = 40_000_000
 LEGACY_REFERENCE_ROLE_ALIASES = {
     "nuvibu": "emma",
     "cast": "friends",
@@ -101,6 +105,10 @@ class PipelineService:
         self.settings = settings
         self._music_provider: MusicProvider | None = None
         self._video_provider: VideoProvider | None = None
+        self._image_validation_cache: dict[
+            tuple[str, int, int],
+            bool,
+        ] = {}
 
     @property
     def music_provider(self) -> MusicProvider:
@@ -190,17 +198,109 @@ class PipelineService:
         )
 
     @staticmethod
-    def _asset_file_is_valid(asset: Asset) -> bool:
+    def _complete_image_file(path: Path) -> bool:
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter(
+                    "error",
+                    Image.DecompressionBombWarning,
+                )
+                with Image.open(path) as image:
+                    image.verify()
+                with Image.open(path) as image:
+                    image.load()
+        except (
+            OSError,
+            UnidentifiedImageError,
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+        ):
+            return False
+        return True
+
+    @staticmethod
+    def _normalized_reference_image(source: Path, role: str) -> Image.Image:
+        label = REFERENCE_ROLE_LABELS[role]
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter(
+                    "error",
+                    Image.DecompressionBombWarning,
+                )
+                with Image.open(source) as probe:
+                    actual_format = probe.format
+                    width, height = probe.size
+                    frame_count = int(getattr(probe, "n_frames", 1))
+                    if actual_format not in REFERENCE_ALLOWED_IMAGE_FORMATS:
+                        raise ValueError(
+                            f"{label}: usa un’immagine PNG, JPEG o WebP"
+                        )
+                    if (
+                        width < 1
+                        or height < 1
+                        or width > REFERENCE_MAX_IMAGE_DIMENSION
+                        or height > REFERENCE_MAX_IMAGE_DIMENSION
+                        or width * height > REFERENCE_MAX_IMAGE_PIXELS
+                    ):
+                        raise ValueError(
+                            f"{label}: le dimensioni dell’immagine sono eccessive"
+                        )
+                    if frame_count != 1:
+                        raise ValueError(
+                            f"{label}: usa un’immagine statica, non animata"
+                        )
+                    probe.verify()
+                with Image.open(source) as image:
+                    image.load()
+                    return ImageOps.exif_transpose(image).convert("RGB")
+        except ValueError:
+            raise
+        except (
+            OSError,
+            UnidentifiedImageError,
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+        ) as exc:
+            raise ValueError(
+                f"{label}: il file è incompleto o danneggiato"
+            ) from exc
+
+    def _asset_file_is_valid(self, asset: Asset) -> bool:
         if (asset.metadata_json or {}).get("invalidated_at"):
             return False
         path = Path(asset.path)
         try:
-            if not path.is_file() or path.stat().st_size <= 0:
+            stat = path.stat()
+            if not path.is_file() or stat.st_size <= 0:
                 return False
         except OSError:
             return False
         if asset.mime_type.startswith("video/") or path.suffix.lower() == ".mp4":
             return is_valid_video(path)
+        if asset.mime_type.startswith("image/") or path.suffix.lower() in {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+        }:
+            cache_key = (
+                str(path),
+                stat.st_size,
+                stat.st_mtime_ns,
+            )
+            cached = self._image_validation_cache.get(cache_key)
+            if cached is None:
+                cached = self._complete_image_file(path)
+                expected_sha256 = (asset.metadata_json or {}).get(
+                    "stored_sha256"
+                )
+                if cached and isinstance(expected_sha256, str):
+                    actual_sha256 = hashlib.sha256(
+                        path.read_bytes()
+                    ).hexdigest()
+                    cached = actual_sha256 == expected_sha256
+                self._image_validation_cache[cache_key] = cached
+            return cached
         return True
 
     def _valid_assets(self, episode: Episode, kind: AssetKind) -> list[Asset]:
@@ -1495,6 +1595,21 @@ class PipelineService:
                     "world": Path(assets["world"].path),
                 },
                 emma_look_id=look.id,
+                source_metadata={
+                    role: {
+                        key: value
+                        for key in (
+                            "reference_preset_id",
+                            "source_sha256",
+                        )
+                        if (
+                            value
+                            := (assets[role].metadata_json or {}).get(key)
+                        )
+                        is not None
+                    }
+                    for role in ("friends", "world")
+                },
             )
             return look.id
 
@@ -1690,9 +1805,14 @@ class PipelineService:
         sources: dict[str, Path],
         *,
         emma_look: EmmaLook | None = None,
+        source_metadata: dict[str, dict[str, object]] | None = None,
     ) -> list[Asset]:
         if not sources or any(role not in REFERENCE_ROLE_ORDER for role in sources):
             raise ValueError("Unknown or empty reference role set")
+        if source_metadata and any(
+            role not in REFERENCE_ROLE_ORDER for role in source_metadata
+        ):
+            raise ValueError("Unknown reference source metadata role")
         self._lock_episode(episode)
         active_job = self.active_job(episode)
         if active_job is not None:
@@ -1749,28 +1869,58 @@ class PipelineService:
             if asset.kind == AssetKind.CHARACTER_REFERENCE
         }
         destinations: dict[str, Path] = {}
-        for role in REFERENCE_ROLE_ORDER:
-            source = sources.get(role)
-            if source is None:
-                continue
-            destination = (
-                self.settings.upload_dir
-                / episode.id
-                / f"reference-{role}-{uuid.uuid4().hex}.png"
-            )
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(suffix=".png") as processed:
-                with Image.open(source) as image:
-                    image = ImageOps.exif_transpose(image).convert("RGB")
-                    canvas = Image.new("RGB", (1280, 720), "white")
-                    image.thumbnail((1280, 720), Image.Resampling.LANCZOS)
-                    canvas.paste(
-                        image,
-                        ((1280 - image.width) // 2, (720 - image.height) // 2),
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix="nuvibu-reference-",
+            ) as staging_directory:
+                staged: dict[str, Path] = {}
+                for role in REFERENCE_ROLE_ORDER:
+                    source = sources.get(role)
+                    if source is None:
+                        continue
+                    staged_path = Path(staging_directory) / f"{role}.png"
+                    with self._normalized_reference_image(
+                        source,
+                        role,
+                    ) as image:
+                        with Image.new(
+                            "RGB",
+                            (1280, 720),
+                            "white",
+                        ) as canvas:
+                            image.thumbnail(
+                                (1280, 720),
+                                Image.Resampling.LANCZOS,
+                            )
+                            canvas.paste(
+                                image,
+                                (
+                                    (1280 - image.width) // 2,
+                                    (720 - image.height) // 2,
+                                ),
+                            )
+                            canvas.save(staged_path, "PNG")
+                    staged[role] = staged_path
+
+                for role, staged_path in staged.items():
+                    destination = (
+                        self.settings.upload_dir
+                        / episode.id
+                        / f"reference-{role}-{uuid.uuid4().hex}.png"
                     )
-                    canvas.save(processed.name, "PNG")
-                self._copy_completed_file(Path(processed.name), destination)
-            destinations[role] = destination
+                    destinations[role] = destination
+                    self._copy_completed_file(
+                        staged_path,
+                        destination,
+                    )
+        except Exception:
+            self.db.rollback()
+            for destination in destinations.values():
+                try:
+                    destination.unlink(missing_ok=True)
+                except OSError:
+                    pass
+            raise
 
         try:
             for target in targets:
@@ -1778,10 +1928,16 @@ class PipelineService:
             self.db.flush()
 
             def reference_metadata(role: str) -> dict[str, object]:
-                metadata: dict[str, object] = {
-                    "reference_role": role,
-                    "reference_label": REFERENCE_ROLE_LABELS[role],
-                }
+                metadata = dict((source_metadata or {}).get(role, {}))
+                metadata.update(
+                    {
+                        "reference_role": role,
+                        "reference_label": REFERENCE_ROLE_LABELS[role],
+                        "stored_sha256": hashlib.sha256(
+                            destinations[role].read_bytes()
+                        ).hexdigest(),
+                    }
+                )
                 if role == "emma" and emma_look is not None:
                     metadata.update(
                         {
@@ -1820,7 +1976,10 @@ class PipelineService:
         except Exception:
             self.db.rollback()
             for destination in destinations.values():
-                destination.unlink(missing_ok=True)
+                try:
+                    destination.unlink(missing_ok=True)
+                except OSError:
+                    pass
             raise
 
         for old_path in old_reference_paths:
@@ -1840,6 +1999,7 @@ class PipelineService:
         sources: dict[str, Path],
         *,
         emma_look_id: str | None = None,
+        source_metadata: dict[str, dict[str, object]] | None = None,
     ) -> list[Asset]:
         if set(sources) != set(REFERENCE_ROLE_ORDER):
             missing = ", ".join(
@@ -1858,6 +2018,7 @@ class PipelineService:
             episode,
             trusted_sources,
             emma_look=look,
+            source_metadata=source_metadata,
         )
 
     def save_character_reference(self, episode: Episode, source: Path) -> Asset:

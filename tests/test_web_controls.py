@@ -291,6 +291,298 @@ def test_reference_pack_upload_requires_and_displays_all_three_slots(
         assert "Reference Mondo dell’episodio" in detail.text
 
 
+def test_bundled_reference_preset_is_recommended_and_applied_server_side(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        created = client.post(
+            "/episodes",
+            data={
+                "title": "Palloncini colorati",
+                "theme": "nanna",
+                "hook": "Emma sogna tra arcobaleni e nuvolette",
+                "target_words": "arcobaleno, nanna, nuvolette, culla",
+                "featured_characters": "Emma, Nuvi la nuvola",
+                "age_min_months": "6",
+                "age_max_months": "24",
+                "duration_seconds": "75",
+                "bpm": "92",
+                "visual_pacing": "gentle",
+                "language": "it",
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        episode_url = created.headers["location"]
+        original_has_valid_asset = (
+            main_module.PipelineService.has_valid_asset
+        )
+        monkeypatch.setattr(
+            main_module.PipelineService,
+            "has_valid_asset",
+            lambda service, episode, kind: (
+                True
+                if kind == main_module.AssetKind.MUSIC
+                else original_has_valid_asset(service, episode, kind)
+            ),
+        )
+        monkeypatch.setattr(
+            main_module.PipelineService,
+            "content_is_approved",
+            lambda _service, _episode, content_kind: (
+                content_kind == "storyboard"
+            ),
+        )
+
+        detail = client.get(episode_url)
+
+        assert detail.status_code == 200
+        assert detail.text.count('class="reference-preset-card') == 2
+        assert "Reference pack precaricati" in detail.text
+        assert "Nanna arcobaleno" in detail.text
+        assert "reference-preset-recommended" in detail.text
+        nanna_preset = next(
+            preset
+            for preset in main_module.REFERENCE_PRESETS
+            if preset.id == "nanna-arcobaleno-v1"
+        )
+        assert nanna_preset.image_url("friends") in detail.text
+        assert nanna_preset.image_url("world") in detail.text
+
+        preview = client.get(nanna_preset.image_url("world"))
+        assert preview.status_code == 200
+        assert preview.headers["content-type"] == "image/png"
+        with Image.open(BytesIO(preview.content)) as image:
+            image.load()
+            assert (image.mode, image.size) == ("RGB", (1280, 720))
+
+        applied = client.post(
+            f"{episode_url}/reference-preset",
+            data={
+                "emma_look_id": main_module.NEW_EPISODE_DEFAULT_LOOK_ID,
+                "reference_preset_id": nanna_preset.id,
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert applied.status_code == 303
+        assert applied.headers["location"] == (
+            f"{episode_url}#character-reference"
+        )
+        saved = sorted(
+            (tmp_path / "storage" / "uploads").glob(
+                "*/reference-*.png"
+            )
+        )
+        assert len(saved) == 3
+        for path in saved:
+            with Image.open(path) as image:
+                image.load()
+                assert (image.mode, image.size) == ("RGB", (1280, 720))
+        selected_detail = client.get(episode_url)
+        assert "reference-preset-selected" in selected_detail.text
+        assert ">in uso</span>" in selected_detail.text
+
+
+def test_truncated_upload_names_the_broken_role_and_leaves_no_partial_pack(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        episode_url = _create_episode(client)
+        broken_world = _png_bytes("green")[:64]
+
+        rejected = client.post(
+            f"{episode_url}/reference",
+            files={
+                "friends_file": (
+                    "friends.png",
+                    _png_bytes("red"),
+                    "image/png",
+                ),
+                "world_file": (
+                    "world.png",
+                    broken_world,
+                    "image/png",
+                ),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert rejected.status_code == 303
+        error_page = client.get(rejected.headers["location"])
+        assert error_page.status_code == 200
+        assert (
+            "Invalid reference pack: Mondo dell’episodio: "
+            "il file è incompleto o danneggiato"
+        ) in error_page.text
+        assert 'role="alert"' in error_page.text
+        assert not list(
+            (tmp_path / "storage" / "uploads").glob(
+                "*/reference-*.png"
+            )
+        )
+
+
+def test_truncated_replacement_preserves_the_existing_complete_pack(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        episode_url = _create_episode(client)
+        first = client.post(
+            f"{episode_url}/reference",
+            files={
+                "friends_file": (
+                    "friends.png",
+                    _png_bytes("red"),
+                    "image/png",
+                ),
+                "world_file": (
+                    "world.png",
+                    _png_bytes("green"),
+                    "image/png",
+                ),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert first.status_code == 303
+        stored_before = {
+            path: path.read_bytes()
+            for path in (tmp_path / "storage" / "uploads").glob(
+                "*/reference-*.png"
+            )
+        }
+        assert len(stored_before) == 3
+
+        rejected = client.post(
+            f"{episode_url}/reference",
+            files={
+                "friends_file": (
+                    "friends-new.png",
+                    _png_bytes("blue"),
+                    "image/png",
+                ),
+                "world_file": (
+                    "world-broken.png",
+                    _png_bytes("yellow")[:64],
+                    "image/png",
+                ),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert rejected.status_code == 303
+        error_page = client.get(rejected.headers["location"])
+        assert "Mondo dell’episodio" in error_page.text
+        stored_after = {
+            path: path.read_bytes()
+            for path in (tmp_path / "storage" / "uploads").glob(
+                "*/reference-*.png"
+            )
+        }
+        assert stored_after == stored_before
+        detail = client.get(episode_url)
+        assert "3/3 completo" in detail.text
+
+
+def test_upload_rejects_a_mislabelled_or_oversized_image(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        episode_url = _create_episode(client)
+        gif = BytesIO()
+        Image.new("RGB", (64, 64), "red").save(gif, "GIF")
+
+        wrong_format = client.post(
+            f"{episode_url}/reference",
+            files={
+                "friends_file": (
+                    "friends.png",
+                    gif.getvalue(),
+                    "image/png",
+                ),
+                "world_file": (
+                    "world.png",
+                    _png_bytes("green"),
+                    "image/png",
+                ),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert wrong_format.status_code == 303
+        wrong_format_page = client.get(
+            wrong_format.headers["location"]
+        )
+        assert (
+            "Invalid reference pack: Amici dell’episodio: "
+            "usa un’immagine PNG, JPEG o WebP"
+        ) in wrong_format_page.text
+
+        oversized = BytesIO()
+        Image.new("RGB", (8193, 1), "blue").save(oversized, "PNG")
+        too_large = client.post(
+            f"{episode_url}/reference",
+            files={
+                "friends_file": (
+                    "friends.png",
+                    oversized.getvalue(),
+                    "image/png",
+                ),
+                "world_file": (
+                    "world.png",
+                    _png_bytes("green"),
+                    "image/png",
+                ),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert too_large.status_code == 303
+        too_large_page = client.get(too_large.headers["location"])
+        assert (
+            "Invalid reference pack: Amici dell’episodio: "
+            "le dimensioni dell’immagine sono eccessive"
+        ) in too_large_page.text
+
+
 def test_failed_dispatch_can_be_retried_from_episode_page(
     tmp_path: Path,
     monkeypatch,
