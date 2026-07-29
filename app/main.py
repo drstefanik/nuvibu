@@ -5,7 +5,6 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from ipaddress import ip_address
 import secrets
-import shutil
 import tempfile
 from pathlib import Path
 from urllib.parse import quote, urlsplit
@@ -35,6 +34,8 @@ from .services.growth import calculate_growth_score, latest_metric
 from .services.pipeline import (
     ActiveJobError,
     PipelineService,
+    REFERENCE_ROLE_LABELS,
+    REFERENCE_ROLE_ORDER,
     ReferenceChangeConflictError,
     slugify,
 )
@@ -464,10 +465,7 @@ def validate_production_stage(
         and service.has_valid_asset(episode, AssetKind.STORYBOARD)
     )
     has_music = service.has_valid_asset(episode, AssetKind.MUSIC)
-    has_reference = service.has_valid_asset(
-        episode,
-        AssetKind.CHARACTER_REFERENCE,
-    )
+    has_reference = service.reference_pack_complete(episode)
     has_qc = service.has_valid_asset(episode, AssetKind.REPORT)
 
     if through_step == "lyrics":
@@ -540,7 +538,10 @@ def validate_production_stage(
         if not has_reference:
             raise HTTPException(
                 status_code=409,
-                detail="Upload the approved Nuvibù character reference before rendering",
+                detail=(
+                    "Upload the complete approved reference pack "
+                    "(Nuvibù, seven chicks and world) before rendering"
+                ),
             )
         if has_qc:
             raise HTTPException(
@@ -741,6 +742,11 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
         episode,
         AssetKind.MUSIC,
     )
+    reference_assets = {
+        service.explicit_reference_role(asset): asset
+        for asset in service.reference_pack_assets(episode)
+    }
+    legacy_reference = service.legacy_reference_asset(episode)
     return templates.TemplateResponse(
         request, "episode_detail.html",
         {
@@ -774,10 +780,11 @@ def episode_detail(request: Request, episode_id: str, db: Session = Depends(get_
             "has_music": service.has_valid_asset(episode, AssetKind.MUSIC),
             "selected_music": selected_music,
             "can_regenerate_music": service.can_regenerate_music(episode),
-            "has_reference": service.has_valid_asset(
-                episode,
-                AssetKind.CHARACTER_REFERENCE,
-            ),
+            "has_reference": service.reference_pack_complete(episode),
+            "reference_assets": reference_assets,
+            "legacy_reference": legacy_reference,
+            "reference_role_order": REFERENCE_ROLE_ORDER,
+            "reference_role_labels": REFERENCE_ROLE_LABELS,
             "has_qc": service.has_valid_asset(
                 episode,
                 AssetKind.REPORT,
@@ -966,20 +973,103 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @app.post("/episodes/{episode_id}/reference")
-def upload_character_reference(episode_id: str, file: UploadFile = File(...), db: Session = Depends(get_db)):
+def upload_reference_pack(
+    episode_id: str,
+    existing_role: str = Form(""),
+    nuvibu_file: UploadFile | None = File(None),
+    cast_file: UploadFile | None = File(None),
+    world_file: UploadFile | None = File(None),
+    db: Session = Depends(get_db),
+):
     episode = get_episode_or_404(db, episode_id)
-    if file.content_type not in {"image/png", "image/jpeg", "image/webp"}:
-        raise HTTPException(status_code=400, detail="Upload a PNG, JPEG or WebP image")
-    with tempfile.NamedTemporaryFile(suffix=Path(file.filename or "reference.png").suffix, delete=False) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        temp_path = Path(tmp.name)
+    service = PipelineService(db, settings)
+    uploads = {
+        "nuvibu": nuvibu_file,
+        "cast": cast_file,
+        "world": world_file,
+    }
+    allowed_types = {"image/png", "image/jpeg", "image/webp"}
+    temporary_paths: dict[str, Path] = {}
     try:
+        sources = {
+            service.explicit_reference_role(asset): Path(asset.path)
+            for asset in service.reference_pack_assets(episode)
+        }
+        legacy_reference = service.legacy_reference_asset(episode)
+        if legacy_reference is not None:
+            if existing_role not in REFERENCE_ROLE_ORDER:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Assign the previously uploaded reference to "
+                        "Nuvibù, seven chicks or world"
+                    ),
+                )
+            sources[existing_role] = Path(legacy_reference.path)
+
+        for role in REFERENCE_ROLE_ORDER:
+            upload = uploads[role]
+            if upload is None or not upload.filename:
+                continue
+            if upload.content_type not in allowed_types:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{REFERENCE_ROLE_LABELS[role]}: "
+                        "upload a PNG, JPEG or WebP image"
+                    ),
+                )
+            suffix = Path(upload.filename or "reference.png").suffix or ".png"
+            with tempfile.NamedTemporaryFile(
+                suffix=suffix,
+                delete=False,
+            ) as temporary:
+                temporary_paths[role] = Path(temporary.name)
+                total = 0
+                while chunk := upload.file.read(1024 * 1024):
+                    total += len(chunk)
+                    if total > 20 * 1024 * 1024:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=(
+                                f"{REFERENCE_ROLE_LABELS[role]} exceeds "
+                                "the 20 MB Veo input limit"
+                            ),
+                        )
+                    temporary.write(chunk)
+            sources[role] = temporary_paths[role]
+
+        missing_roles = [
+            role
+            for role in REFERENCE_ROLE_ORDER
+            if role not in sources
+        ]
+        if missing_roles:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Reference pack incomplete: missing "
+                    + ", ".join(
+                        REFERENCE_ROLE_LABELS[role]
+                        for role in missing_roles
+                    )
+                ),
+            )
         try:
-            PipelineService(db, settings).save_character_reference(episode, temp_path)
+            service.save_reference_pack(
+                episode,
+                sources,
+            )
         except ReferenceChangeConflictError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (OSError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid reference pack: {exc}",
+            ) from exc
     finally:
-        temp_path.unlink(missing_ok=True)
+        for temporary_path in temporary_paths.values():
+            temporary_path.unlink(missing_ok=True)
     return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
 
 

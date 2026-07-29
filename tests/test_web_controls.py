@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 import app.main as main_module
+from PIL import Image
 from tests.test_auth import configured_client
 
 
@@ -18,6 +20,64 @@ def _login(client) -> None:
         follow_redirects=False,
     )
     assert response.status_code == 303
+
+
+def _png_bytes(color: str) -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (64, 64), color).save(output, "PNG")
+    return output.getvalue()
+
+
+def test_reference_pack_upload_requires_and_displays_all_three_slots(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        created = client.post(
+            "/episodes",
+            data={
+                "title": "Reference pack",
+                "theme": "colori",
+                "hook": "Sette pulcini con Nuvibù",
+                "target_words": "rosso, giallo, verde",
+                "featured_characters": "Nuvibù, pulcini",
+                "age_min_months": "6",
+                "age_max_months": "24",
+                "duration_seconds": "75",
+                "bpm": "112",
+                "visual_pacing": "gentle",
+                "language": "it",
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        episode_url = created.headers["location"]
+
+        uploaded = client.post(
+            f"{episode_url}/reference",
+            files={
+                "nuvibu_file": ("nuvibu.png", _png_bytes("white"), "image/png"),
+                "cast_file": ("cast.png", _png_bytes("red"), "image/png"),
+                "world_file": ("world.png", _png_bytes("green"), "image/png"),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert uploaded.status_code == 303
+        detail = client.get(episode_url)
+        assert detail.status_code == 200
+        assert "3/3 completo" in detail.text
+        assert "Reference Nuvibù" in detail.text
+        assert "Reference Sette pulcini" in detail.text
+        assert "Reference Mondo" in detail.text
 
 
 def test_failed_dispatch_can_be_retried_from_episode_page(

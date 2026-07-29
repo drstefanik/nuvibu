@@ -156,6 +156,84 @@ def test_reference_change_is_blocked_while_pipeline_job_is_active(tmp_path: Path
         assert old_reference.exists()
 
 
+def test_reference_pack_is_saved_in_stable_veo_order(tmp_path: Path):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        sources = {
+            "world": tmp_path / "world.png",
+            "nuvibu": tmp_path / "nuvibu.png",
+            "cast": tmp_path / "cast.png",
+        }
+        write_png(sources["nuvibu"], "white")
+        write_png(sources["cast"], "red")
+        write_png(sources["world"], "green")
+
+        service = PipelineService(db, settings)
+        assets = service.save_reference_pack(episode, sources)
+
+        assert service.reference_pack_complete(episode) is True
+        assert [
+            asset.metadata_json["reference_role"]
+            for asset in assets
+        ] == ["nuvibu", "cast", "world"]
+        assert [asset.variant for asset in assets] == [1, 2, 3]
+        assert [path.name.split("-")[1] for path in service.reference_images(episode)] == [
+            "nuvibu",
+            "cast",
+            "world",
+        ]
+        assert all(asset.width == 1280 for asset in assets)
+        assert all(asset.height == 720 for asset in assets)
+
+
+def test_legacy_single_reference_can_be_adopted_as_cast(tmp_path: Path):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        legacy_cast = tmp_path / "legacy-cast.png"
+        nuvibu = tmp_path / "nuvibu.png"
+        world = tmp_path / "world.png"
+        write_png(legacy_cast, "red")
+        write_png(nuvibu, "white")
+        write_png(world, "green")
+        legacy_asset = Asset(
+            episode=episode,
+            kind=AssetKind.CHARACTER_REFERENCE,
+            provider="old-single-reference-flow",
+            path=str(legacy_cast),
+            mime_type="image/png",
+            selected=True,
+        )
+        db.add(legacy_asset)
+        db.commit()
+
+        service = PipelineService(db, settings)
+        assert service.legacy_reference_asset(episode).id == legacy_asset.id
+        assets = service.save_reference_pack(
+            episode,
+            {
+                "nuvibu": nuvibu,
+                "cast": legacy_cast,
+                "world": world,
+            },
+        )
+
+        assert service.reference_pack_complete(episode) is True
+        assert [
+            asset.metadata_json["reference_role"]
+            for asset in assets
+        ] == ["nuvibu", "cast", "world"]
+        assert not legacy_cast.exists()
+        assert all(Path(asset.path).exists() for asset in assets)
+
+
 def test_reference_change_preserves_dependent_outputs_and_spend(tmp_path: Path):
     Session = make_session(tmp_path)
     settings = make_settings(tmp_path)

@@ -195,12 +195,21 @@ class VeoProvider:
         prompt: str,
         generation_duration: int,
         seed: int,
-        reference_image: Path | None,
+        reference_images: list[Path] | None = None,
+        reference_image: Path | None = None,
     ) -> str:
         digest = hashlib.sha256()
         digest.update(prompt.encode("utf-8"))
         digest.update(f"\0{generation_duration}\0{seed}\0".encode("ascii"))
-        if reference_image and reference_image.exists():
+        references = list(reference_images or [])
+        if (
+            reference_image
+            and reference_image.exists()
+            and reference_image not in references
+        ):
+            references.insert(0, reference_image)
+        for reference_image in references:
+            digest.update(b"\0reference\0")
             digest.update(reference_image.read_bytes())
         return digest.hexdigest()
 
@@ -238,34 +247,37 @@ class VeoProvider:
         prompt: str,
         generation_duration: int,
         seed: int,
-        reference_image: Path | None,
+        reference_images: list[Path],
     ) -> dict[str, Any]:
         instance: dict[str, Any] = {"prompt": prompt}
-        if reference_image and reference_image.exists():
-            encoded_reference = base64.b64encode(reference_image.read_bytes()).decode(
-                "ascii"
-            )
+        if reference_images:
             if self.backend == "gemini":
                 instance["referenceImages"] = [
                     {
                         "image": {
                             "inlineData": {
                                 "mimeType": self._mime_type(reference_image),
-                                "data": encoded_reference,
+                                "data": base64.b64encode(
+                                    reference_image.read_bytes()
+                                ).decode("ascii"),
                             }
                         },
                         "referenceType": "asset",
                     }
+                    for reference_image in reference_images
                 ]
             else:
                 instance["referenceImages"] = [
                     {
                         "image": {
-                            "bytesBase64Encoded": encoded_reference,
+                            "bytesBase64Encoded": base64.b64encode(
+                                reference_image.read_bytes()
+                            ).decode("ascii"),
                             "mimeType": self._mime_type(reference_image),
                         },
                         "referenceType": "asset",
                     }
+                    for reference_image in reference_images
                 ]
 
         parameters: dict[str, Any] = {
@@ -297,7 +309,7 @@ class VeoProvider:
         prompt: str,
         generation_duration: int,
         seed: int,
-        reference_image: Path | None,
+        reference_images: list[Path],
     ) -> str:
         response = httpx.post(
             self._start_endpoint(),
@@ -306,7 +318,7 @@ class VeoProvider:
                 prompt=prompt,
                 generation_duration=generation_duration,
                 seed=seed,
-                reference_image=reference_image,
+                reference_images=reference_images,
             ),
             timeout=90,
         )
@@ -438,9 +450,19 @@ class VeoProvider:
         output_path: Path,
         seed: int,
         reference_image: Path | None = None,
+        reference_images: list[Path] | None = None,
     ) -> VideoResult:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        has_reference = bool(reference_image and reference_image.exists())
+        references = [
+            path
+            for path in (reference_images or [])
+            if path.exists()
+        ]
+        if reference_image and reference_image.exists() and reference_image not in references:
+            references.insert(0, reference_image)
+        if len(references) > 3:
+            raise ValueError("Veo 3.1 accepts at most three reference images")
+        has_reference = bool(references)
         # Subject-reference generation is fixed to 8 seconds in Veo 3.1.
         generation_duration = (
             8
@@ -456,7 +478,7 @@ class VeoProvider:
             prompt=prompt,
             generation_duration=generation_duration,
             seed=seed,
-            reference_image=reference_image,
+            reference_images=references,
         )
         operation_name = self._load_operation(output_path, request_fingerprint)
         if operation_name is None:
@@ -470,7 +492,7 @@ class VeoProvider:
                     prompt=prompt,
                     generation_duration=generation_duration,
                     seed=seed,
-                    reference_image=reference_image,
+                    reference_images=references,
                 )
             except httpx.HTTPStatusError as exc:
                 # A rejected 4xx request was not accepted for generation and is
@@ -522,6 +544,7 @@ class VeoProvider:
                 "model": self.model,
                 "operation": operation_name,
                 "reference_used": has_reference,
+                "reference_count": len(references),
                 "price_per_second_usd": price_per_second,
             },
         )

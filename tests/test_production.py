@@ -77,8 +77,13 @@ def test_veo_sends_subject_reference_and_uses_full_model_price(tmp_path: Path, m
         )
 
     monkeypatch.setattr("app.providers.veo.httpx.post", fake_post)
-    reference = tmp_path / "nuvibu.png"
-    reference.write_bytes(b"png")
+    references = [
+        tmp_path / "nuvibu.png",
+        tmp_path / "cast.png",
+        tmp_path / "world.png",
+    ]
+    for index, reference in enumerate(references, start=1):
+        reference.write_bytes(f"reference-{index}".encode())
     output = tmp_path / "scene.mp4"
     provider = VeoProvider(
         project="nuvibu",
@@ -94,16 +99,25 @@ def test_veo_sends_subject_reference_and_uses_full_model_price(tmp_path: Path, m
         duration_seconds=4,
         output_path=output,
         seed=173,
-        reference_image=reference,
+        reference_images=references,
     )
 
     instance = calls[0]["json"]["instances"][0]
     parameters = calls[0]["json"]["parameters"]
     assert "image" not in instance
-    assert instance["referenceImages"][0]["referenceType"] == "asset"
+    assert len(instance["referenceImages"]) == 3
+    assert all(
+        reference["referenceType"] == "asset"
+        for reference in instance["referenceImages"]
+    )
+    assert [
+        base64.b64decode(reference["image"]["bytesBase64Encoded"])
+        for reference in instance["referenceImages"]
+    ] == [b"reference-1", b"reference-2", b"reference-3"]
     assert parameters["durationSeconds"] == 8
     assert output.read_bytes() == b"video-bytes"
     assert result.cost_usd == 1.6
+    assert result.metadata["reference_count"] == 3
 
 
 def test_live_enqueue_is_lazy_idempotent_and_budget_uses_reference_cost(tmp_path: Path):

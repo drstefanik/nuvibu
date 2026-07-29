@@ -48,4 +48,5 @@ class VideoProvider(Protocol):
         output_path: Path,
         seed: int,
         reference_image: Path | None = None,
+        reference_images: list[Path] | None = None,
     ) -> VideoResult: ...

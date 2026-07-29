@@ -132,12 +132,24 @@ class MockVideoProvider:
         output_path: Path,
         seed: int,
         reference_image: Path | None = None,
+        reference_images: list[Path] | None = None,
     ) -> VideoResult:
         del prompt
         output_path.parent.mkdir(parents=True, exist_ok=True)
         still_path = output_path.with_suffix(".png")
 
-        source_path = reference_image if reference_image and reference_image.exists() else self.concepts[seed % len(self.concepts)]
+        references = [
+            path
+            for path in (reference_images or [])
+            if path.exists()
+        ]
+        if reference_image and reference_image.exists() and reference_image not in references:
+            references.insert(0, reference_image)
+        source_path = (
+            references[0]
+            if references
+            else self.concepts[seed % len(self.concepts)]
+        )
         if not source_path.exists():
             raise RuntimeError(f"Mock concept image missing: {source_path}")
 
@@ -175,7 +187,8 @@ class MockVideoProvider:
             duration_seconds=float(duration_seconds),
             metadata={
                 "publication_ready": False,
-                "reference_used": bool(reference_image),
+                "reference_used": bool(references),
+                "reference_count": len(references),
                 "source_image": str(source_path),
                 "animation": "slow-pan-preview-only",
             },

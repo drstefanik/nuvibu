@@ -15,6 +15,22 @@
 .music-player{display:block;width:100%;margin:18px 0}
 .music-regeneration{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1fr) auto;gap:18px;align-items:center;margin-top:18px}
 .music-regeneration p{margin:5px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
+.reference-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:20px}
+.reference-card{border:1px solid var(--line);border-radius:18px;padding:14px;background:#fafbfe}
+.reference-card-ready{background:#fff}
+.reference-card-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.reference-card-heading strong{font-size:13px}
+.reference-card .reference-preview{height:145px;object-fit:cover;margin-top:12px}
+.reference-placeholder{height:145px;margin-top:12px;border:1px dashed #cfd4df;border-radius:14px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:12px;padding:12px;background:#f4f5fa}
+.reference-upload-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;margin-top:18px;padding:16px;border:1px solid #dcd4ef;border-radius:16px;background:#fff}
+.reference-upload-form label{display:flex;flex-direction:column}
+.reference-upload-form label small{display:block;min-height:34px;margin-top:4px;line-height:1.35}
+.reference-upload-form input{margin-top:10px;padding:10px}
+.reference-upload-form .button{grid-column:1/-1;justify-self:end;min-width:220px}
+.legacy-reference{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,360px);gap:18px;align-items:center;margin-top:18px;padding:16px;border:1px solid #dcd4ef;border-radius:16px;background:#f8f4ff}
+.legacy-reference p:not(.eyebrow){margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.5}
+.legacy-reference .reference-preview{height:150px;object-fit:cover;margin:0}
+.reference-upload-form .existing-reference-role{grid-column:1/-1;padding:14px;border-radius:13px;background:#f4f2ff}
 .confirm-check{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:1.45;cursor:pointer}
 .confirm-check input{width:19px;height:19px;flex:0 0 auto;margin:0;margin-top:1px;accent-color:var(--accent)}
 .confirm-check span{font-weight:600}
@@ -58,6 +74,10 @@
   .stage-copy h2{font-size:24px}
   .paid-stage{padding:14px}
   .music-regeneration{grid-template-columns:1fr}
+  .reference-grid,.reference-upload-form{grid-template-columns:1fr}
+  .legacy-reference{grid-template-columns:1fr}
+  .reference-upload-form label small{min-height:0}
+  .reference-upload-form .button{justify-self:stretch}
   .panel-title{align-items:flex-start}
   .job-table-wrap{margin-left:-4px;margin-right:-4px}
   .upload-form{display:flex;flex-direction:column;align-items:stretch}

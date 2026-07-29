@@ -32,6 +32,12 @@ from .safety import review_episode
 
 
 STEP_ORDER = ["lyrics", "storyboard", "music", "scenes", "render", "qc"]
+REFERENCE_ROLE_ORDER = ("nuvibu", "cast", "world")
+REFERENCE_ROLE_LABELS = {
+    "nuvibu": "Nuvibù",
+    "cast": "Sette pulcini",
+    "world": "Mondo",
+}
 REFERENCE_DEPENDENT_ASSET_KINDS = {
     AssetKind.VIDEO_SCENE,
     AssetKind.RENDER,
@@ -1308,12 +1314,69 @@ class PipelineService:
         episode.status = EpisodeStatus.STORYBOARD_READY
         self.db.commit()
 
-    def character_reference(self, episode: Episode) -> Path | None:
-        asset = next(
-            (a for a in self._valid_assets(episode, AssetKind.CHARACTER_REFERENCE) if a.selected),
+    @staticmethod
+    def explicit_reference_role(asset: Asset) -> str | None:
+        role = str((asset.metadata_json or {}).get("reference_role", ""))
+        return role if role in REFERENCE_ROLE_ORDER else None
+
+    def reference_pack_assets(self, episode: Episode) -> list[Asset]:
+        selected = [
+            asset
+            for asset in self._valid_assets(
+                episode,
+                AssetKind.CHARACTER_REFERENCE,
+            )
+            if asset.selected
+        ]
+        by_role: dict[str, Asset] = {}
+        for asset in selected:
+            role = self.explicit_reference_role(asset)
+            if role is not None:
+                by_role[role] = asset
+        return [
+            by_role[role]
+            for role in REFERENCE_ROLE_ORDER
+            if role in by_role
+        ]
+
+    def legacy_reference_asset(self, episode: Episode) -> Asset | None:
+        return next(
+            (
+                asset
+                for asset in reversed(
+                    self._valid_assets(
+                        episode,
+                        AssetKind.CHARACTER_REFERENCE,
+                    )
+                )
+                if asset.selected
+                and self.explicit_reference_role(asset) is None
+            ),
             None,
         )
-        return Path(asset.path) if asset else None
+
+    def reference_images(self, episode: Episode) -> list[Path]:
+        references = [
+            Path(asset.path)
+            for asset in self.reference_pack_assets(episode)
+        ]
+        if references:
+            return references
+        legacy = self.legacy_reference_asset(episode)
+        return [Path(legacy.path)] if legacy is not None else []
+
+    def reference_pack_complete(self, episode: Episode) -> bool:
+        roles = {
+            self.explicit_reference_role(asset)
+            for asset in self.reference_pack_assets(episode)
+        }
+        return roles == set(REFERENCE_ROLE_ORDER)
+
+    def character_reference(self, episode: Episode) -> Path | None:
+        """Backward-compatible accessor for the primary Nuvibù reference."""
+
+        references = self.reference_images(episode)
+        return references[0] if references else None
 
     def _lock_episode(self, episode: Episode) -> None:
         locked_id = self.db.scalar(
@@ -1495,7 +1558,13 @@ class PipelineService:
                 f"receipt exists: {sidecar}"
             )
 
-    def save_character_reference(self, episode: Episode, source: Path) -> Asset:
+    def _save_reference_sources(
+        self,
+        episode: Episode,
+        sources: dict[str, Path],
+    ) -> list[Asset]:
+        if not sources or any(role not in REFERENCE_ROLE_ORDER for role in sources):
+            raise ValueError("Unknown or empty reference role set")
         self._lock_episode(episode)
         active_job = self.active_job(episode)
         if active_job is not None:
@@ -1538,24 +1607,6 @@ class PipelineService:
                 "reference-dependent production exists"
             )
 
-        destination = (
-            self.settings.upload_dir
-            / episode.id
-            / f"character-reference-{uuid.uuid4().hex}.png"
-        )
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(suffix=".png") as processed:
-            with Image.open(source) as image:
-                image = ImageOps.exif_transpose(image).convert("RGB")
-                canvas = Image.new("RGB", (1280, 720), "white")
-                image.thumbnail((1280, 720), Image.Resampling.LANCZOS)
-                canvas.paste(
-                    image,
-                    ((1280 - image.width) // 2, (720 - image.height) // 2),
-                )
-                canvas.save(processed.name, "PNG")
-            self._copy_completed_file(Path(processed.name), destination)
-
         targets = list(
             self.db.scalars(
                 select(Asset).where(
@@ -1568,39 +1619,95 @@ class PipelineService:
             Path(asset.path)
             for asset in targets
             if asset.kind == AssetKind.CHARACTER_REFERENCE
-            and Path(asset.path) != destination
         }
+        destinations: dict[str, Path] = {}
+        for role in REFERENCE_ROLE_ORDER:
+            source = sources.get(role)
+            if source is None:
+                continue
+            destination = (
+                self.settings.upload_dir
+                / episode.id
+                / f"reference-{role}-{uuid.uuid4().hex}.png"
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(suffix=".png") as processed:
+                with Image.open(source) as image:
+                    image = ImageOps.exif_transpose(image).convert("RGB")
+                    canvas = Image.new("RGB", (1280, 720), "white")
+                    image.thumbnail((1280, 720), Image.Resampling.LANCZOS)
+                    canvas.paste(
+                        image,
+                        ((1280 - image.width) // 2, (720 - image.height) // 2),
+                    )
+                    canvas.save(processed.name, "PNG")
+                self._copy_completed_file(Path(processed.name), destination)
+            destinations[role] = destination
 
         try:
             for target in targets:
                 self.db.delete(target)
             self.db.flush()
-            asset = self._asset(
-                episode,
-                kind=AssetKind.CHARACTER_REFERENCE,
-                path=destination,
-                mime_type="image/png",
-                provider="user-approved-reference",
-                selected=True,
-                width=1280,
-                height=720,
-            )
+            assets = [
+                self._asset(
+                    episode,
+                    kind=AssetKind.CHARACTER_REFERENCE,
+                    path=destinations[role],
+                    mime_type="image/png",
+                    provider="user-approved-reference-pack",
+                    variant=index,
+                    selected=True,
+                    width=1280,
+                    height=720,
+                    metadata={
+                        "reference_role": role,
+                        "reference_label": REFERENCE_ROLE_LABELS[role],
+                    },
+                )
+                for index, role in enumerate(REFERENCE_ROLE_ORDER, start=1)
+                if role in destinations
+            ]
             episode.status = self._status_after_reference_change(episode)
             self._update_actual_cost(episode)
             self.db.commit()
         except Exception:
             self.db.rollback()
-            destination.unlink(missing_ok=True)
+            for destination in destinations.values():
+                destination.unlink(missing_ok=True)
             raise
 
         for old_path in old_reference_paths:
+            if old_path in destinations.values():
+                continue
             try:
                 old_path.unlink(missing_ok=True)
             except OSError:
                 # The database already points exclusively at the new reference;
                 # an orphaned old image is harmless and can be cleaned later.
                 pass
-        return asset
+        return assets
+
+    def save_reference_pack(
+        self,
+        episode: Episode,
+        sources: dict[str, Path],
+    ) -> list[Asset]:
+        if set(sources) != set(REFERENCE_ROLE_ORDER):
+            missing = ", ".join(
+                REFERENCE_ROLE_LABELS[role]
+                for role in REFERENCE_ROLE_ORDER
+                if role not in sources
+            )
+            raise ValueError(f"Reference pack incomplete: {missing}")
+        return self._save_reference_sources(episode, sources)
+
+    def save_character_reference(self, episode: Episode, source: Path) -> Asset:
+        """Store one legacy subject reference for older callers and tests."""
+
+        return self._save_reference_sources(
+            episode,
+            {"nuvibu": source},
+        )[0]
 
     def generate_scenes(self, episode: Episode) -> None:
         if not episode.storyboard_json:
@@ -1612,8 +1719,8 @@ class PipelineService:
             raise RuntimeError(
                 "Approve the current storyboard before starting Veo"
             )
-        reference = self.character_reference(episode)
-        if self.settings.provider_mode == "live" and reference is None:
+        references = self.reference_images(episode)
+        if self.settings.provider_mode == "live" and not references:
             raise RuntimeError(
                 "A valid selected character reference is required before "
                 "starting Veo"
@@ -1644,7 +1751,7 @@ class PipelineService:
             result: VideoResult | None = None
             last_error: Exception | None = None
             if is_valid_video(path):
-                generation_duration = 8 if reference else (
+                generation_duration = 8 if references else (
                     4 if int(scene["duration_seconds"]) <= 4
                     else 6 if int(scene["duration_seconds"]) <= 6
                     else 8
@@ -1666,9 +1773,20 @@ class PipelineService:
                         # Avoid holding a Neon connection while a Veo operation
                         # can run for several minutes.
                         self.db.commit()
+                        reference_context = (
+                            "\nReference mapping: image 1 is Nuvibù, image 2 is "
+                            "the exact seven-chick cast, and image 3 is the empty "
+                            "episode world. Preserve their identity, colors, "
+                            "materials and environment exactly."
+                            if len(references) == 3
+                            else ""
+                        )
                         result = self.video_provider.generate(
-                            prompt=scene["prompt"], duration_seconds=int(scene["duration_seconds"]), output_path=path,
-                            seed=173 + index, reference_image=reference,
+                            prompt=scene["prompt"] + reference_context,
+                            duration_seconds=int(scene["duration_seconds"]),
+                            output_path=path,
+                            seed=173 + index,
+                            reference_images=references,
                         )
                         result.metadata["attempt"] = attempt + 1
                         result.metadata["planned_duration_seconds"] = int(scene["duration_seconds"])
