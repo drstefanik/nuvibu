@@ -9,6 +9,7 @@ from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Intege
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from .music_direction import DEFAULT_MUSIC_DIRECTION
 
 
 def utcnow() -> datetime:
@@ -68,6 +69,11 @@ class Episode(Base):
     featured_characters: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
     duration_seconds: Mapped[int] = mapped_column(Integer, default=75, nullable=False)
     bpm: Mapped[int] = mapped_column(Integer, default=92, nullable=False)
+    music_direction: Mapped[str] = mapped_column(
+        Text,
+        default=DEFAULT_MUSIC_DIRECTION,
+        nullable=False,
+    )
     visual_pacing: Mapped[str] = mapped_column(String(32), default="gentle", nullable=False)
     language: Mapped[str] = mapped_column(String(10), default="it", nullable=False)
     status: Mapped[EpisodeStatus] = mapped_column(

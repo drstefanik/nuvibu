@@ -61,6 +61,52 @@ def _emma_look_buttons(html: str) -> list[str]:
     )
 
 
+def test_music_direction_field_is_prefilled_and_persists(
+    tmp_path: Path,
+    monkeypatch,
+):
+    direction = (
+        "Turbo electro-pop con basso elastico. Voce femminile adulta e robot "
+        "maschile con vocoder; nessun coro infantile continuo."
+    )
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        form = client.get("/episodes/new")
+
+        assert form.status_code == 200
+        assert "Direzione musicale e vocale" in form.text
+        assert 'name="music_direction"' in form.text
+        assert form.text.index('name="bpm"') < form.text.index(
+            'name="music_direction"'
+        )
+        assert "Voce principale femminile adulta" in form.text
+
+        created = client.post(
+            "/episodes",
+            data={
+                "title": "Robot turbo",
+                "theme": "baby dance",
+                "hook": "Emma insegue un robot ballerino",
+                "target_words": "robot, turbo",
+                "featured_characters": "Emma, Robot Bumbo",
+                "age_min_months": "9",
+                "age_max_months": "36",
+                "duration_seconds": "75",
+                "bpm": "128",
+                "music_direction": direction,
+                "visual_pacing": "energetic",
+                "language": "it",
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert created.status_code == 303
+        detail = client.get(created.headers["location"])
+        assert detail.status_code == 200
+        assert direction in detail.text
+
+
 def test_episode_page_has_exactly_ten_clickable_emma_looks(
     tmp_path: Path,
     monkeypatch,

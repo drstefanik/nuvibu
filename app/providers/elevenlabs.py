@@ -42,6 +42,8 @@ def build_music_v2_composition_plan(
     lyrics: str,
     duration_seconds: int,
     bpm: int,
+    production_prompt: str = "",
+    music_direction: str = "",
 ) -> dict:
     """Bind approved lyrics and exact section timing for Music v2."""
 
@@ -78,17 +80,35 @@ def build_music_v2_composition_plan(
     # whole track. Repeat an explicit *band* arrangement in every chunk so the
     # lyrics constraint cannot collapse the result into spoken or a-cappella
     # vocals.
-    global_styles = [
-        f"{bpm} BPM",
-        "original modern preschool pop",
-        "bright major key",
-        "full instrumental backing under every sung line",
-        "steady acoustic drum groove with audible kick and snare throughout",
-        "audible warm bass groove throughout",
-        "bright ukulele chord strumming throughout",
-        "glockenspiel and toy piano melodic hook",
-        "polished wide stereo mix with the lead vocal balanced over the band",
-    ]
+    direction = music_direction.strip()
+    if direction:
+        # Music v2 has no free-form top-level prompt when a composition plan is
+        # supplied. Styles are the provider-supported channel for keeping the
+        # user's direction separate from the approved lyrics in ``text``.
+        global_styles = [
+            f"{bpm} BPM",
+            production_prompt.strip(),
+            f"Authoritative musical and vocal direction: {direction}",
+            "follow the authoritative musical and vocal direction exactly",
+            "full instrumental backing under every sung line",
+            "polished full-frequency mix with clearly audible rhythm and bass",
+            "keep every approved lyric highly intelligible",
+        ]
+    else:
+        # Compatibility fallback for episodes created before the dedicated
+        # music-direction field existed.
+        global_styles = [
+            f"{bpm} BPM",
+            "original modern preschool pop",
+            "bright major key",
+            "full instrumental backing under every sung line",
+            "steady acoustic drum groove with audible kick and snare throughout",
+            "audible warm bass groove throughout",
+            "bright ukulele chord strumming throughout",
+            "glockenspiel and toy piano melodic hook",
+            "polished wide stereo mix with the lead vocal balanced over the band",
+        ]
+    global_styles = [style for style in global_styles if style]
     global_negative_styles = [
         "dark",
         "aggressive",
@@ -98,43 +118,72 @@ def build_music_v2_composition_plan(
         "a cappella",
         "voice only",
         "unaccompanied choir",
-        "spoken word",
-        "recitation",
         "sparse backing",
         "ambient drone",
         "long unaccompanied vocal passages",
         "sound effects without music",
     ]
+    if direction:
+        global_negative_styles.append(
+            "entire song as spoken word or recitation"
+        )
+    else:
+        global_negative_styles.extend(["spoken word", "recitation"])
     chunks = []
     for index, ((name, lines), duration_ms) in enumerate(
         zip(sections, durations, strict=True)
     ):
-        positive_styles = global_styles + [
-            "clear warm Italian lead vocal",
-            "highly intelligible Italian lyrics",
-            "simple melody for very young children",
-        ]
+        if direction:
+            positive_styles = global_styles + [
+                "vocal identities and delivery follow the supplied direction",
+                "highly intelligible approved lyrics",
+            ]
+        else:
+            positive_styles = global_styles + [
+                "clear warm Italian lead vocal",
+                "highly intelligible Italian lyrics",
+                "simple melody for very young children",
+            ]
         normalized_name = name.casefold()
         if index == 0 or "intro" in normalized_name:
-            positive_styles.extend(
-                [
-                    "instrumental hook starts in the first second",
-                    "rhythm section enters immediately and never drops out",
-                ]
-            )
+            if direction:
+                positive_styles.append(
+                    "opening follows the supplied direction with no generic slow nursery intro"
+                )
+            else:
+                positive_styles.extend(
+                    [
+                        "instrumental hook starts in the first second",
+                        "rhythm section enters immediately and never drops out",
+                    ]
+                )
         if "ritornello" in normalized_name or "chorus" in normalized_name:
-            positive_styles.extend(
-                [
-                    "memorable singalong hook",
-                    "full-band chorus lift",
-                    "stronger kick and bass",
-                    "gentle hand claps",
-                    "light child backing vocals behind the lead",
-                ]
-            )
+            if direction:
+                positive_styles.extend(
+                    [
+                        "memorable chorus hook",
+                        "full-arrangement chorus lift",
+                        "stronger rhythm and bass",
+                        "chorus vocals and backing responses follow the supplied direction exactly",
+                    ]
+                )
+            else:
+                positive_styles.extend(
+                    [
+                        "memorable singalong hook",
+                        "full-band chorus lift",
+                        "stronger kick and bass",
+                        "gentle hand claps",
+                        "light child backing vocals behind the lead",
+                    ]
+                )
         elif "strofa" in normalized_name or "verse" in normalized_name:
             positive_styles.append(
-                "steady ukulele, kick, bass and glockenspiel accompaniment"
+                (
+                    "verse arrangement and vocal delivery follow the supplied direction exactly"
+                    if direction
+                    else "steady ukulele, kick, bass and glockenspiel accompaniment"
+                )
             )
         if "final" in normalized_name or "outro" in normalized_name:
             positive_styles.extend(
@@ -175,6 +224,7 @@ def music_request_fingerprint(
     *,
     lyrics: str,
     prompt: str,
+    music_direction: str = "",
     duration_seconds: int,
     bpm: int,
     variant: int,
@@ -182,15 +232,22 @@ def music_request_fingerprint(
     output_format: str,
 ) -> str:
     digest = hashlib.sha256()
-    for value in (
-        lyrics,
-        prompt,
-        str(duration_seconds),
-        str(bpm),
-        str(variant),
-        model_id,
-        output_format,
-    ):
+    values = [lyrics, prompt]
+    # Preserve fingerprints created before this field existed when an older
+    # episode has no direction. A real direction still becomes part of the
+    # idempotency key and cannot be reconciled with a different brief.
+    if music_direction:
+        values.append(music_direction)
+    values.extend(
+        [
+            str(duration_seconds),
+            str(bpm),
+            str(variant),
+            model_id,
+            output_format,
+        ]
+    )
+    for value in values:
         digest.update(value.encode("utf-8"))
         digest.update(b"\0")
     return digest.hexdigest()
@@ -213,6 +270,7 @@ class ElevenLabsMusicProvider:
         *,
         lyrics: str,
         prompt: str,
+        music_direction: str = "",
         duration_seconds: int,
         bpm: int,
         output_path: Path,
@@ -225,16 +283,35 @@ class ElevenLabsMusicProvider:
                     lyrics=lyrics,
                     duration_seconds=duration_seconds,
                     bpm=bpm,
+                    production_prompt=prompt,
+                    music_direction=music_direction,
                 ),
                 "model_id": self.model_id,
                 "sign_with_c2pa": True,
             }
         else:
+            direction_block = (
+                "\nAuthoritative musical and vocal direction, separate from "
+                f"the lyrics:\n{music_direction.strip()}\n"
+                if music_direction.strip()
+                else "\n"
+            )
+            provider_constraints = (
+                "Original preschool song with a full instrumental arrangement. "
+                "The supplied musical and vocal direction is authoritative. "
+                "Keep the approved lyrics highly intelligible and do not "
+                "imitate existing artists or songs."
+                if music_direction.strip()
+                else (
+                    "Original nursery song, gentle dynamics, clean lead vocal, "
+                    "highly intelligible lyrics, no imitation of existing "
+                    "artists or songs."
+                )
+            )
             full_prompt = (
-                f"{prompt}\nTempo: {bpm} BPM. Exact target duration: "
-                f"{duration_seconds} seconds. Original nursery song, gentle "
-                "dynamics, clean lead vocal, highly intelligible lyrics, no "
-                "imitation of existing artists or songs. Lyrics:\n" + lyrics
+                f"{prompt}{direction_block}Tempo: {bpm} BPM. Exact target "
+                f"duration: {duration_seconds} seconds. "
+                f"{provider_constraints} Lyrics:\n{lyrics}"
             )
             payload = {
                 "prompt": full_prompt,
@@ -244,6 +321,7 @@ class ElevenLabsMusicProvider:
         fingerprint = music_request_fingerprint(
             lyrics=lyrics,
             prompt=prompt,
+            music_direction=music_direction,
             duration_seconds=duration_seconds,
             bpm=bpm,
             variant=variant,
@@ -278,6 +356,7 @@ class ElevenLabsMusicProvider:
                     "model": self.model_id,
                     "output_format": self.output_format,
                     "duration_seconds": duration_seconds,
+                    "music_direction": music_direction,
                 },
                 sort_keys=True,
             ),
@@ -326,6 +405,7 @@ class ElevenLabsMusicProvider:
                     "model": self.model_id,
                     "output_format": self.output_format,
                     "duration_seconds": duration_seconds,
+                    "music_direction": music_direction,
                     "estimated_cost_usd": round(estimated_cost, 4),
                     "bytes": len(response.content),
                 },
@@ -344,5 +424,6 @@ class ElevenLabsMusicProvider:
                 "output_format": self.output_format,
                 "song_id": song_id,
                 "request_fingerprint": fingerprint,
+                "music_direction": music_direction,
             },
         )

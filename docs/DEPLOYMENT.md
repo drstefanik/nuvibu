@@ -15,7 +15,9 @@ Vercel non è necessario per questa architettura.
 ## Prerequisiti
 
 1. Il progetto Google Cloud deve essere `nuvibu` e avere la fatturazione attiva.
-2. La migrazione `migrations/0001_initial.sql` deve essere applicata a Neon.
+2. Tutte le migrazioni SQL in `migrations/`, in ordine numerico, devono essere
+   applicate a Neon. Per un database già esistente applicare almeno
+   `migrations/0002_music_direction.sql` prima di distribuire questa versione.
 3. Secret Manager deve contenere `elevenlabs-api-key`.
 4. Recuperare da Neon la connection string **pooled** del branch `production`.
 5. Verificare che il progetto abbia accesso e quota per Veo in `us-central1`.

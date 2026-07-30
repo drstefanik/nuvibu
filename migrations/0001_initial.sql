@@ -14,6 +14,7 @@ CREATE TABLE public.episodes (
     featured_characters JSON NOT NULL,
     duration_seconds INTEGER NOT NULL,
     bpm INTEGER NOT NULL,
+    music_direction TEXT NOT NULL DEFAULT '',
     visual_pacing VARCHAR(32) NOT NULL,
     language VARCHAR(10) NOT NULL,
     status VARCHAR(16) NOT NULL,

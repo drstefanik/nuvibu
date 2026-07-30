@@ -32,6 +32,7 @@ class MusicProvider(Protocol):
         *,
         lyrics: str,
         prompt: str,
+        music_direction: str = "",
         duration_seconds: int,
         bpm: int,
         output_path: Path,

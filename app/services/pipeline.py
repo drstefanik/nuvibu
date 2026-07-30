@@ -1828,6 +1828,7 @@ class PipelineService:
                     expected_fingerprint = music_request_fingerprint(
                         lyrics=episode.lyrics_text or "",
                         prompt=provider_prompt,
+                        music_direction=episode.music_direction,
                         duration_seconds=episode.duration_seconds,
                         bpm=episode.bpm,
                         variant=variant,
@@ -1856,6 +1857,7 @@ class PipelineService:
                 result = self.music_provider.generate(
                     lyrics=episode.lyrics_text or "",
                     prompt=provider_prompt,
+                    music_direction=episode.music_direction,
                     duration_seconds=episode.duration_seconds,
                     bpm=episode.bpm,
                     output_path=path,

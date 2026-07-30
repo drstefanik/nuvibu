@@ -327,6 +327,10 @@
     <div class="tags top-gap">
       {% for word in episode.target_words %}<span>{{ word }}</span>{% endfor %}
     </div>
+    <div class="notice top-gap">
+      <strong>Direzione musicale e vocale</strong>
+      <p>{{ episode.music_direction }}</p>
+    </div>
     {% if editorial.get('candidates') %}
     <div class="top-gap">
       <p class="muted"><strong>Selezione interna:</strong> quattro concept confrontati per originalità, cantabilità, energia e coerenza.</p>

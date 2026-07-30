@@ -662,6 +662,7 @@ def test_completed_music_before_ledger_resumes_the_same_reserved_job(
             fingerprint = music_request_fingerprint(
                 lyrics=episode.lyrics_text or "",
                 prompt=music_prompt(episode),
+                music_direction=episode.music_direction,
                 duration_seconds=episode.duration_seconds,
                 bpm=episode.bpm,
                 variant=1,
@@ -824,6 +825,34 @@ def test_ambiguous_music_submission_blocks_duplicate_purchase(
     assert calls == 1
 
 
+def test_empty_music_direction_preserves_legacy_request_fingerprint():
+    values = (
+        "Canta con Nuvibù",
+        "Original preschool song",
+        "24",
+        "92",
+        "1",
+        "music_v2",
+        "mp3_48000_192",
+    )
+    legacy_digest = hashlib.sha256()
+    for value in values:
+        legacy_digest.update(value.encode("utf-8"))
+        legacy_digest.update(b"\0")
+
+    fingerprint = music_request_fingerprint(
+        lyrics=values[0],
+        prompt=values[1],
+        duration_seconds=24,
+        bpm=92,
+        variant=1,
+        model_id=values[5],
+        output_format=values[6],
+    )
+
+    assert fingerprint == legacy_digest.hexdigest()
+
+
 def test_music_v2_uses_exact_composition_plan_and_approved_lines(
     tmp_path: Path,
     monkeypatch,
@@ -865,10 +894,15 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
         output_format="mp3_48000_192",
     )
     output = tmp_path / "song.mp3"
+    direction = (
+        "Electro-pop energico con synth arcade. Voce femminile adulta; "
+        "robot parlato con vocoder; cori infantili solo per risposte brevi."
+    )
 
     result = provider.generate(
         lyrics=lyrics,
-        prompt="This prompt must not replace approved lyrics",
+        prompt="Original Italian song; use the separate direction as authoritative.",
+        music_direction=direction,
         duration_seconds=75,
         bpm=112,
         output_path=output,
@@ -905,16 +939,36 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
     )
     assert all(chunk["context_adherence"] == "high" for chunk in plan["chunks"])
     first_styles = set(plan["chunks"][0]["positive_styles"])
+    assert f"Authoritative musical and vocal direction: {direction}" in first_styles
+    assert all(direction not in chunk["text"] for chunk in plan["chunks"])
     assert "full instrumental backing under every sung line" in first_styles
-    assert "audible warm bass groove throughout" in first_styles
-    assert "bright ukulele chord strumming throughout" in first_styles
-    assert "instrumental hook starts in the first second" in first_styles
+    assert "bright ukulele chord strumming throughout" not in first_styles
+    assert "simple melody for very young children" not in first_styles
+    assert (
+        "opening follows the supplied direction with no generic slow nursery intro"
+        in first_styles
+    )
     assert "a cappella" in plan["chunks"][0]["negative_styles"]
     chorus_styles = set(plan["chunks"][1]["positive_styles"])
-    assert "full-band chorus lift" in chorus_styles
-    assert "stronger kick and bass" in chorus_styles
+    assert "full-arrangement chorus lift" in chorus_styles
+    assert "light child backing vocals behind the lead" not in chorus_styles
     assert result.path == output
     assert result.metadata["song_id"] == "song-structured"
+    assert result.metadata["music_direction"] == direction
+
+
+def test_music_v2_legacy_fallback_keeps_default_arrangement():
+    plan = build_music_v2_composition_plan(
+        lyrics="[Intro]\nCiao!\n\n[Ritornello]\nCanta con me!",
+        duration_seconds=15,
+        bpm=92,
+    )
+
+    first_styles = set(plan["chunks"][0]["positive_styles"])
+    chorus_styles = set(plan["chunks"][1]["positive_styles"])
+    assert "bright ukulele chord strumming throughout" in first_styles
+    assert "instrumental hook starts in the first second" in first_styles
+    assert "light child backing vocals behind the lead" in chorus_styles
 
 
 def test_composition_plan_keeps_short_sections_positive():

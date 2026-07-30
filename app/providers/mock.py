@@ -36,6 +36,7 @@ class MockMusicProvider:
         *,
         lyrics: str,
         prompt: str,
+        music_direction: str = "",
         duration_seconds: int,
         bpm: int,
         output_path: Path,
@@ -87,7 +88,12 @@ class MockMusicProvider:
             provider="mock-original-instrumental",
             variant=variant,
             duration_seconds=float(duration_seconds),
-            metadata={"publication_ready": False, "vocal": False, "bpm": bpm},
+            metadata={
+                "publication_ready": False,
+                "vocal": False,
+                "bpm": bpm,
+                "music_direction": music_direction,
+            },
         )
 
 

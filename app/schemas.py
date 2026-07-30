@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
+from .music_direction import (
+    DEFAULT_MUSIC_DIRECTION,
+    MAX_MUSIC_DIRECTION_LENGTH,
+)
+
 
 class EpisodeCreate(BaseModel):
     title: str = Field(min_length=3, max_length=180)
@@ -16,8 +21,18 @@ class EpisodeCreate(BaseModel):
     )
     duration_seconds: int = Field(default=24, ge=15, le=600)
     bpm: int = Field(default=92, ge=60, le=160)
+    music_direction: str = Field(
+        default=DEFAULT_MUSIC_DIRECTION,
+        min_length=20,
+        max_length=MAX_MUSIC_DIRECTION_LENGTH,
+    )
     visual_pacing: str = Field(default="gentle", pattern=r"^(gentle|medium|energetic)$")
     language: str = Field(default="it", pattern=r"^(it|en)$")
+
+    @field_validator("music_direction", mode="before")
+    @classmethod
+    def normalize_music_direction(cls, value):
+        return str(value or "").strip()
 
     @field_validator("target_words", mode="before")
     @classmethod

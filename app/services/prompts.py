@@ -96,6 +96,21 @@ def music_prompt(episode: Episode) -> str:
         generation.get("format") or resolve_song_format(episode)
     )
     archetype = str(generation.get("archetype") or "micro-story")
+    direction = str(getattr(episode, "music_direction", "") or "").strip()
+    if direction:
+        return (
+            f"Original {language} preschool song for ages "
+            f"{episode.age_min_months}–{episode.age_max_months} months. "
+            f"Theme: {episode.theme}. Hook: {episode.hook}. Target words: "
+            f"{', '.join(episode.target_words)}. Editorial format: "
+            f"{FORMAT_LABELS.get(song_format, song_format)}. Narrative "
+            f"archetype: {archetype}. {episode.bpm} BPM. Follow the separately "
+            "supplied musical and vocal direction as the authoritative style, "
+            "arrangement and casting brief; do not replace it with a generic "
+            "nursery-song sound. Keep every approved word intelligible and do "
+            "not add or improvise lyrics. No imitation of an existing song, "
+            "melody, performer or branded character."
+        )
     if song_format == "nanna":
         energy = (
             "soft, slow and reassuring lullaby; sparse warm arrangement, "

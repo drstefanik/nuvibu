@@ -18,6 +18,10 @@
     <label>Durata sec<input type="number" name="duration_seconds" value="75" min="30" max="{{ settings.max_episode_seconds }}"></label>
     <label>BPM <small id="bpm-guidance">Colori: 96–132</small><input id="episode-bpm" type="number" name="bpm" value="108" min="60" max="160"></label>
   </div>
+  <label for="music-direction">Direzione musicale e vocale
+    <small>Inviata al generatore musicale separatamente dal testo</small>
+    <textarea id="music-direction" name="music_direction" rows="7" minlength="20" maxlength="4000" required>{{ default_music_direction }}</textarea>
+  </label>
   <div class="field-grid two">
     <label>Ritmo visivo<select name="visual_pacing"><option value="gentle" selected>Dolce: scene da circa 8 sec</option><option value="medium">Medio: scene da circa 6 sec</option><option value="energetic">Energico: scene da circa 5 sec</option></select></label>
     <label>Lingua<select name="language"><option value="it">Italiano</option><option value="en">English</option></select></label>

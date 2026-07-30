@@ -40,6 +40,7 @@ from .emma_looks import (
     NEW_EPISODE_DEFAULT_LOOK_ID,
 )
 from .models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus, MetricSnapshot, PublishRecord
+from .music_direction import DEFAULT_MUSIC_DIRECTION
 from .providers.youtube import YouTubeClient
 from .reference_presets import (
     REFERENCE_PRESET_ROLES,
@@ -737,7 +738,14 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
 @app.get("/episodes/new", response_class=HTMLResponse)
 def new_episode(request: Request):
-    return templates.TemplateResponse(request, "episode_form.html", {"settings": settings})
+    return templates.TemplateResponse(
+        request,
+        "episode_form.html",
+        {
+            "settings": settings,
+            "default_music_direction": DEFAULT_MUSIC_DIRECTION,
+        },
+    )
 
 
 @app.post("/episodes")
@@ -747,6 +755,7 @@ def create_episode_form(
     featured_characters: str = Form("Emma, Nuvi la nuvola"),
     age_min_months: int = Form(6), age_max_months: int = Form(24),
     duration_seconds: int = Form(24), bpm: int = Form(92),
+    music_direction: str = Form(DEFAULT_MUSIC_DIRECTION),
     visual_pacing: str = Form("gentle"), language: str = Form("it"),
     db: Session = Depends(get_db),
 ):
@@ -760,7 +769,9 @@ def create_episode_form(
         target_words=[x.strip() for x in target_words.split(",") if x.strip()],
         featured_characters=[x.strip() for x in featured_characters.split(",") if x.strip()],
         age_min_months=age_min_months, age_max_months=age_max_months,
-        duration_seconds=duration_seconds, bpm=bpm, visual_pacing=visual_pacing, language=language,
+        duration_seconds=duration_seconds, bpm=bpm,
+        music_direction=music_direction,
+        visual_pacing=visual_pacing, language=language,
     )
     base_slug = slugify(payload.title)
     candidate = base_slug
