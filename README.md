@@ -11,7 +11,11 @@ L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends*
 ### Implementato
 
 - brief episodio con età, tema, hook, parole target, durata, BPM e ritmo visivo;
-- bozza originale di testo e metadati;
+- motore editoriale v2 con sei format realmente distinti e dieci archetipi narrativi;
+- quattro concept interni per episodio, valutati per originalità, cantabilità, energia e coerenza;
+- memoria del catalogo recente per ritornelli, frasi, verbi, rime, strutture, archetipi e gag;
+- blacklist dinamica delle formule abusate e controllo di similarità sugli ultimi episodi;
+- revisione metrica, ritornello specifico e storyboard costruito sulla progressione selezionata;
 - varianti musicali e adattatore ElevenLabs Music;
 - storyboard automatico in scene;
 - adattatore Google Veo dual backend (Gemini API o Vertex AI) con character reference;
@@ -219,7 +223,8 @@ python -m compileall app scripts tests
 ```
 
 I test coprono autenticazione, approvazioni editoriali, guardrail di spesa,
-ripresa sicura dei job, integrità media e pipeline mock completa con render,
+ripresa sicura dei job, integrità media, memoria anti-riciclo, selezione dei
+quattro concept, coerenza testo/storyboard e pipeline mock completa con render,
 Short, thumbnail e report QC.
 
 ## Docker

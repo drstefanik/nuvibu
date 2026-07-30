@@ -35,11 +35,11 @@ from ..providers.elevenlabs import music_receipt_path, music_request_fingerprint
 from ..providers.veo import veo_price_per_second
 from .prompts import (
     emma_visual_guard,
-    generate_lyrics,
     generate_storyboard,
     music_prompt,
     publish_metadata,
 )
+from .lyrics_engine import generate_song
 from .render import concatenate_scenes, create_thumbnail, make_vertical_short, mux_music
 from .safety import review_episode
 
@@ -194,6 +194,26 @@ class PipelineService:
                 select(Asset)
                 .where(Asset.episode_id == episode.id, Asset.kind == kind)
                 .order_by(Asset.variant.asc(), Asset.created_at.asc())
+            )
+        )
+
+    def _catalog_episodes(
+        self,
+        episode: Episode,
+        *,
+        limit: int = 200,
+    ) -> list[Episode]:
+        """Return newest usable lyrics for catalog-aware editorial checks."""
+
+        return list(
+            self.db.scalars(
+                select(Episode)
+                .where(
+                    Episode.id != episode.id,
+                    Episode.lyrics_text.is_not(None),
+                )
+                .order_by(Episode.created_at.desc())
+                .limit(limit)
             )
         )
 
@@ -1232,6 +1252,13 @@ class PipelineService:
         episode.storyboard_json = []
         episode.qc_json = {}
         self._clear_content_approvals(episode, "lyrics", "storyboard")
+        concept = dict(episode.concept_json or {})
+        generation = dict(concept.get("editorial_generation") or {})
+        if generation:
+            generation["manually_edited"] = True
+            generation["selected_scores"] = {}
+            concept["editorial_generation"] = generation
+            episode.concept_json = concept
         title, description, tags = publish_metadata(episode)
         episode.publish_title = title
         episode.publish_description = description
@@ -1288,14 +1315,33 @@ class PipelineService:
         self._clear_content_approvals(episode, "lyrics", "storyboard")
         episode.storyboard_json = []
         episode.qc_json = {}
-        episode.lyrics_text = generate_lyrics(episode)
+        catalog = self._catalog_episodes(episode)
+        generation = generate_song(
+            episode,
+            recent_episodes=catalog[:10],
+            catalog_episodes=catalog,
+        )
+        episode.lyrics_text = generation.lyrics
+        concept = dict(episode.concept_json or {})
+        concept["editorial_generation"] = generation.diagnostics()
+        episode.concept_json = concept
         title, description, tags = publish_metadata(episode)
         episode.publish_title = title
         episode.publish_description = description
         episode.publish_tags = tags
         path = self._asset_episode_dir(episode) / "lyrics.txt"
         path.write_text(episode.lyrics_text, encoding="utf-8")
-        self._asset(episode, kind=AssetKind.LYRICS, path=path, mime_type="text/plain", provider="rule-guided-writer", selected=True)
+        self._asset(
+            episode,
+            kind=AssetKind.LYRICS,
+            path=path,
+            mime_type="text/plain",
+            provider="editorial-engine-v2",
+            selected=True,
+            metadata={
+                "editorial_generation": generation.diagnostics(),
+            },
+        )
         episode.status = EpisodeStatus.LYRICS_READY
         self.db.commit()
 
@@ -2256,7 +2302,12 @@ class PipelineService:
             self.db.commit()
             return
         self._remove_assets(episode, {AssetKind.REPORT})
-        result = review_episode(episode)
+        catalog = self._catalog_episodes(episode)
+        result = review_episode(
+            episode,
+            recent_episodes=catalog[:10],
+            catalog_episodes=catalog,
+        )
         episode.qc_json = result.to_dict()
         episode.status = EpisodeStatus.QC_REVIEW if result.passed else EpisodeStatus.FAILED
         path = self._render_episode_dir(episode) / "qc-report.json"

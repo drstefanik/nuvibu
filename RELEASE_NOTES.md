@@ -1,10 +1,18 @@
-# Nuvibù Studio 0.3.0
+# Nuvibù Studio 0.4.0
 
-Data: 29 luglio 2026
+Data: 30 luglio 2026
 
 ## Aggiornamenti
 
 - Nuvibù definito come nome della piattaforma e del canale;
+- sostituito il vecchio template lirico fisso con il motore editoriale v2;
+- resi operativi sei format distinti: animali e versi, colori e trasformazioni, baby dance, cucù e sorpresa, storia musicale e nanna;
+- aggiunta la selezione tra quattro concept con archetipi diversi prima della stesura finale;
+- introdotta memoria del catalogo per titoli, ritornelli, verbi, rime, strutture, archetipi e gag;
+- introdotte blacklist dinamica, similarità anti-riciclo e limite al riuso di frasi/rime degli ultimi dieci episodi;
+- lo storyboard usa ora la progressione narrativa del concept selezionato;
+- il QC valuta originalità, varietà dei verbi, progressione, metrica, forza del ritornello, chiarezza per età e coerenza testo/storyboard;
+- un testo riciclato non può più ottenere 100/100 e viene fermato dal quality gate;
 - introdotta **Emma & Friends**, con Emma protagonista obbligatoria di ogni scena;
 - aggiunta la reference ufficiale di Emma ricavata dalle fotografie approvate;
 - mantenuta la nuvola Nuvi come spalla visivamente secondaria;
