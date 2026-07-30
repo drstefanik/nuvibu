@@ -121,12 +121,8 @@ def music_arrangement_quality(
         }
 
 
-def is_valid_video(path: Path, *, decode_timeout_seconds: int = 180) -> bool:
-    """Return whether a file is a complete, decodable video.
-
-    `ffprobe` verifies the container and stream metadata, while the full FFmpeg
-    decode catches truncated media whose MP4 header is still readable.
-    """
+def is_streamable_video(path: Path, *, probe_timeout_seconds: int = 30) -> bool:
+    """Return whether a browser can discover a real video stream and duration."""
 
     try:
         if not path.is_file() or path.stat().st_size <= 1024:
@@ -147,7 +143,7 @@ def is_valid_video(path: Path, *, decode_timeout_seconds: int = 180) -> bool:
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=probe_timeout_seconds,
         )
         if probe.returncode != 0:
             return False
@@ -169,7 +165,23 @@ def is_valid_video(path: Path, *, decode_timeout_seconds: int = 180) -> bool:
         )
         if not any(_positive_float(value) for value in durations):
             return False
+        return True
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+        subprocess.TimeoutExpired,
+    ):
+        return False
 
+
+def is_valid_video(path: Path, *, decode_timeout_seconds: int = 180) -> bool:
+    """Return whether a file is complete and fully decodable."""
+
+    try:
+        if not is_streamable_video(path):
+            return False
         decode = subprocess.run(
             [
                 "ffmpeg",
@@ -189,7 +201,7 @@ def is_valid_video(path: Path, *, decode_timeout_seconds: int = 180) -> bool:
             timeout=decode_timeout_seconds,
         )
         return decode.returncode == 0
-    except (OSError, ValueError, TypeError, json.JSONDecodeError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return False
 
 

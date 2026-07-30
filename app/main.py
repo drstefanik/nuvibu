@@ -596,6 +596,40 @@ def validate_production_stage(
     return incremental_cost
 
 
+def validate_render_rebuild_stage(
+    service: PipelineService,
+    episode: Episode,
+) -> float:
+    active_job = service.active_job(episode)
+    if active_job is not None:
+        if not (active_job.payload_json or {}).get("rebuild_render"):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Worker job {active_job.id} is already "
+                    f"{active_job.status.value} for another production phase"
+                ),
+            )
+        retryable = (
+            active_job.status == JobStatus.PENDING
+            and worker_dispatch_due(active_job)
+        ) or service.job_is_stale(active_job)
+        if not retryable:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Render rebuild job {active_job.id} is already "
+                    f"{active_job.status.value}; it is not ready to be retried"
+                ),
+            )
+        return 0.0
+    try:
+        service.validate_render_rebuild(episode)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return 0.0
+
+
 def enqueue_and_dispatch(
     db: Session,
     episode: Episode,
@@ -603,16 +637,21 @@ def enqueue_and_dispatch(
     *,
     confirm_cost: bool = False,
     replace_existing_music: bool = False,
+    rebuild_render: bool = False,
 ) -> Job:
     service = PipelineService(db, settings)
     estimated_incremental_cost: float | None = None
     if settings.app_env == "production":
-        estimated_incremental_cost = validate_production_stage(
-            service,
-            episode,
-            through_step,
-            confirm_cost=confirm_cost,
-            replace_existing_music=replace_existing_music,
+        estimated_incremental_cost = (
+            validate_render_rebuild_stage(service, episode)
+            if rebuild_render
+            else validate_production_stage(
+                service,
+                episode,
+                through_step,
+                confirm_cost=confirm_cost,
+                replace_existing_music=replace_existing_music,
+            )
         )
         db.commit()
     try:
@@ -621,6 +660,7 @@ def enqueue_and_dispatch(
             through_step,
             estimated_incremental_cost=estimated_incremental_cost,
             replace_existing_music=replace_existing_music,
+            rebuild_render=rebuild_render,
         )
     except ActiveJobError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -778,6 +818,40 @@ def episode_detail(
         episode,
         AssetKind.MUSIC,
     )
+    main_render = service.selected_display_asset(
+        episode,
+        AssetKind.RENDER,
+    )
+    short_render = service.selected_display_asset(
+        episode,
+        AssetKind.SHORT,
+    )
+    thumbnail = service.selected_display_asset(
+        episode,
+        AssetKind.THUMBNAIL,
+    )
+    has_derived_media_rows = any(
+        asset.kind
+        in {
+            AssetKind.RENDER,
+            AssetKind.SHORT,
+            AssetKind.THUMBNAIL,
+            AssetKind.REPORT,
+        }
+        for asset in episode.assets
+    )
+    thumbnail_is_episode_frame = bool(
+        thumbnail
+        and (thumbnail.metadata_json or {}).get("thumbnail_source")
+        == "final_render_frame"
+        and not (thumbnail.metadata_json or {}).get("preview_label")
+    )
+    render_rebuild_recommended = has_derived_media_rows and (
+        main_render is None
+        or short_render is None
+        or thumbnail is None
+        or not thumbnail_is_episode_frame
+    )
     reference_assets = {
         service.explicit_reference_role(asset): asset
         for asset in service.reference_pack_assets(episode)
@@ -814,7 +888,15 @@ def episode_detail(
         request, "episode_detail.html",
         {
             "episode": episode,
-            "assets_by_kind": grouped_assets(episode),
+            "main_render": main_render,
+            "short_render": short_render,
+            "thumbnail": thumbnail,
+            "render_rebuild_available": (
+                service.render_rebuild_available(episode)
+            ),
+            "render_rebuild_recommended": (
+                render_rebuild_recommended
+            ),
             "jobs": jobs,
             "estimated_cost": estimated_cost,
             "music_estimated_cost": service.estimate_music_cost(episode),
@@ -935,6 +1017,24 @@ def regenerate_music_form(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
+
+
+@app.post("/episodes/{episode_id}/render/rebuild")
+def rebuild_render_form(
+    episode_id: str,
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    if settings.app_env == "production":
+        enqueue_and_dispatch(
+            db,
+            episode,
+            "qc",
+            rebuild_render=True,
+        )
+    else:
+        PipelineService(db, settings).rebuild_render_and_qc(episode)
     return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
 
 
@@ -1315,6 +1415,35 @@ def approve_episode(episode_id: str, db: Session = Depends(get_db)):
         )
     if not episode.qc_json.get("passed"):
         raise HTTPException(status_code=400, detail="Automatic QC must pass before approval")
+    final_assets = {
+        kind: service.selected_valid_asset(episode, kind)
+        for kind in (
+            AssetKind.RENDER,
+            AssetKind.SHORT,
+            AssetKind.THUMBNAIL,
+        )
+    }
+    if any(asset is None for asset in final_assets.values()):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Main video, Short and thumbnail must all pass media "
+                "integrity validation before approval"
+            ),
+        )
+    thumbnail = final_assets[AssetKind.THUMBNAIL]
+    if (
+        (thumbnail.metadata_json or {}).get("thumbnail_source")
+        != "final_render_frame"
+        or (thumbnail.metadata_json or {}).get("preview_label")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Rebuild the final package before approval: concept previews "
+                "cannot be used as production thumbnails"
+            ),
+        )
     episode.status = EpisodeStatus.APPROVED
     db.commit()
     return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
@@ -1357,11 +1486,22 @@ def upload_to_youtube(episode_id: str, db: Session = Depends(get_db)):
 
 
 @app.get("/assets/{asset_id}")
-def serve_asset(asset_id: str, db: Session = Depends(get_db)):
+def serve_asset(
+    asset_id: str,
+    download: bool = False,
+    db: Session = Depends(get_db),
+):
     asset = db.get(Asset, asset_id)
     if asset is None or not Path(asset.path).exists():
         raise HTTPException(status_code=404, detail="Asset not found")
-    return FileResponse(asset.path, media_type=asset.mime_type, filename=Path(asset.path).name)
+    return FileResponse(
+        asset.path,
+        media_type=asset.mime_type,
+        filename=Path(asset.path).name,
+        content_disposition_type=(
+            "attachment" if download else "inline"
+        ),
+    )
 
 
 @app.post("/api/episodes/{episode_id}/metrics")

@@ -27,7 +27,11 @@ from ..emma_looks import (
     EmmaLook,
     get_emma_look,
 )
-from ..media import is_valid_video, music_arrangement_quality
+from ..media import (
+    is_streamable_video,
+    is_valid_video,
+    music_arrangement_quality,
+)
 from ..models import Asset, AssetKind, Episode, EpisodeStatus, Job, JobStatus
 from ..providers import get_music_provider, get_video_provider
 from ..providers.base import MusicProvider, MusicResult, VideoProvider, VideoResult
@@ -66,6 +70,12 @@ REFERENCE_DEPENDENT_ASSET_KINDS = {
     AssetKind.THUMBNAIL,
     AssetKind.REPORT,
 }
+DERIVED_RENDER_ASSET_KINDS = {
+    AssetKind.RENDER,
+    AssetKind.SHORT,
+    AssetKind.THUMBNAIL,
+    AssetKind.REPORT,
+}
 CONTENT_APPROVALS_KEY = "content_approvals"
 BUDGET_RESERVED_USD_KEY = "budget_reserved_usd"
 BUDGET_ACTUAL_BASELINE_USD_KEY = "budget_actual_baseline_usd"
@@ -97,6 +107,14 @@ def slugify(value: str) -> str:
     value = value.translate(replacements)
     value = re.sub(r"[^a-z0-9]+", "-", value).strip("-")
     return value or "episodio"
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class PipelineService:
@@ -351,6 +369,136 @@ class PipelineService:
             None,
         )
 
+    def selected_display_asset(
+        self,
+        episode: Episode,
+        kind: AssetKind,
+    ) -> Asset | None:
+        """Choose newest selected media using a fast browser-readiness check."""
+
+        for asset in reversed(self._assets(episode, kind)):
+            if (
+                not asset.selected
+                or (asset.metadata_json or {}).get("invalidated_at")
+            ):
+                continue
+            path = Path(asset.path)
+            if (
+                asset.mime_type.startswith("video/")
+                or path.suffix.lower() == ".mp4"
+            ):
+                if is_streamable_video(path):
+                    return asset
+                continue
+            if (
+                asset.mime_type.startswith("image/")
+                or path.suffix.lower()
+                in {".jpg", ".jpeg", ".png", ".webp"}
+            ):
+                if self._complete_image_file(path):
+                    return asset
+                continue
+            if path.is_file() and path.stat().st_size > 0:
+                return asset
+        return None
+
+    def validate_render_rebuild(self, episode: Episode) -> None:
+        if episode.status in {
+            EpisodeStatus.SCHEDULED,
+            EpisodeStatus.PUBLISHED,
+        }:
+            raise RuntimeError(
+                "A scheduled or published episode cannot be rebuilt in place"
+            )
+        if not episode.storyboard_json:
+            raise RuntimeError("Storyboard missing; the render cannot be rebuilt")
+        if self.selected_valid_asset(episode, AssetKind.MUSIC) is None:
+            raise RuntimeError("Selected music missing; the render cannot be rebuilt")
+        expected_scene_variants = {
+            int(scene["index"]) + 1 for scene in episode.storyboard_json
+        }
+        actual_scene_variants = {
+            asset.variant
+            for asset in self._valid_assets(episode, AssetKind.VIDEO_SCENE)
+            if asset.selected
+        }
+        if (
+            not expected_scene_variants
+            or actual_scene_variants != expected_scene_variants
+        ):
+            raise RuntimeError(
+                "Approved video scenes are incomplete; a free render rebuild "
+                "cannot call Veo again"
+            )
+
+    def render_rebuild_available(self, episode: Episode) -> bool:
+        if (
+            episode.status
+            in {EpisodeStatus.SCHEDULED, EpisodeStatus.PUBLISHED}
+            or not episode.storyboard_json
+        ):
+            return False
+        music_available = any(
+            asset.selected
+            and not (asset.metadata_json or {}).get("invalidated_at")
+            and Path(asset.path).is_file()
+            for asset in self._assets(episode, AssetKind.MUSIC)
+        )
+        expected_scene_variants = {
+            int(scene["index"]) + 1 for scene in episode.storyboard_json
+        }
+        available_scene_variants = {
+            asset.variant
+            for asset in self._assets(episode, AssetKind.VIDEO_SCENE)
+            if asset.selected
+            and not (asset.metadata_json or {}).get("invalidated_at")
+            and Path(asset.path).is_file()
+        }
+        return (
+            music_available
+            and bool(expected_scene_variants)
+            and available_scene_variants == expected_scene_variants
+        )
+
+    def rebuild_render_and_qc(
+        self,
+        episode: Episode,
+        *,
+        progress_job: Job | None = None,
+    ) -> None:
+        """Recreate only free derived media from existing paid source assets."""
+
+        self.validate_render_rebuild(episode)
+        self._remove_assets(episode, DERIVED_RENDER_ASSET_KINDS)
+        episode.qc_json = {}
+        episode.status = EpisodeStatus.SCENES_READY
+        self.db.commit()
+        for step, operation in (
+            ("render", self.render_episode),
+            ("qc", self.run_qc),
+        ):
+            if progress_job is not None:
+                progress_job.result_json = {
+                    **progress_job.result_json,
+                    "current_step": step,
+                    "pipeline_heartbeat_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                    "derived_media_rebuild": True,
+                }
+                self.db.commit()
+            operation(episode)
+            if progress_job is not None:
+                progress_job.result_json = {
+                    **progress_job.result_json,
+                    "completed_step": step,
+                    "pipeline_heartbeat_at": datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+                    "derived_media_rebuild": True,
+                }
+                self.db.commit()
+
     def _discard_invalid_assets(self, episode: Episode, kind: AssetKind) -> None:
         invalid = [
             asset
@@ -430,6 +578,7 @@ class PipelineService:
 
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.uploading")
+        source_digest = file_sha256(source)
         try:
             last_error: Exception | None = None
             for attempt in range(3):
@@ -438,10 +587,16 @@ class PipelineService:
                     if temporary.stat().st_size != source.stat().st_size:
                         raise OSError("copied object size does not match source")
                     os.replace(temporary, destination)
+                    stored_digest = file_sha256(destination)
+                    if stored_digest != source_digest:
+                        raise OSError(
+                            "stored object digest does not match completed source"
+                        )
                     return
                 except OSError as exc:
                     last_error = exc
                     temporary.unlink(missing_ok=True)
+                    destination.unlink(missing_ok=True)
                     if attempt < 2:
                         time.sleep(2**attempt)
             raise RuntimeError(f"Could not store completed artifact: {last_error}")
@@ -2290,19 +2445,76 @@ class PipelineService:
             create_thumbnail(
                 episode.title,
                 thumbnail_temp,
-                seed=len(episode.title),
-                # This is still concept art, even when the episode video is live.
-                preview_label=True,
+                source_video_path=final_temp,
             )
+            if not is_valid_video(final_temp):
+                raise RuntimeError(
+                    "Final 16:9 render failed media integrity validation"
+                )
+            if not is_valid_video(short_temp):
+                raise RuntimeError(
+                    "Vertical Short failed media integrity validation"
+                )
+            if not self._complete_image_file(thumbnail_temp):
+                raise RuntimeError(
+                    "Episode thumbnail failed image integrity validation"
+                )
             for source, destination in (
                 (final_temp, final_path),
                 (short_temp, short_path),
                 (thumbnail_temp, thumbnail_path),
             ):
                 self._copy_completed_file(source, destination)
-        self._asset(episode, kind=AssetKind.RENDER, path=final_path, mime_type="video/mp4", provider="ffmpeg", selected=True, duration_seconds=episode.duration_seconds, width=1280, height=720)
-        self._asset(episode, kind=AssetKind.SHORT, path=short_path, mime_type="video/mp4", provider="ffmpeg", selected=True, duration_seconds=min(25, episode.duration_seconds), width=1080, height=1920)
-        self._asset(episode, kind=AssetKind.THUMBNAIL, path=thumbnail_path, mime_type="image/png", provider="template-renderer", selected=True, width=1280, height=720)
+        stored_at = datetime.now(timezone.utc).isoformat()
+        self._asset(
+            episode,
+            kind=AssetKind.RENDER,
+            path=final_path,
+            mime_type="video/mp4",
+            provider="ffmpeg-verified",
+            selected=True,
+            duration_seconds=episode.duration_seconds,
+            width=1280,
+            height=720,
+            metadata={
+                "stored_sha256": file_sha256(final_path),
+                "stored_size_bytes": final_path.stat().st_size,
+                "integrity_validated_at": stored_at,
+            },
+        )
+        self._asset(
+            episode,
+            kind=AssetKind.SHORT,
+            path=short_path,
+            mime_type="video/mp4",
+            provider="ffmpeg-verified",
+            selected=True,
+            duration_seconds=min(25, episode.duration_seconds),
+            width=1080,
+            height=1920,
+            metadata={
+                "stored_sha256": file_sha256(short_path),
+                "stored_size_bytes": short_path.stat().st_size,
+                "integrity_validated_at": stored_at,
+            },
+        )
+        self._asset(
+            episode,
+            kind=AssetKind.THUMBNAIL,
+            path=thumbnail_path,
+            mime_type="image/png",
+            provider="episode-frame-thumbnail-v2",
+            selected=True,
+            width=1280,
+            height=720,
+            metadata={
+                "thumbnail_source": "final_render_frame",
+                "preview_label": False,
+                "stored_sha256": file_sha256(thumbnail_path),
+                "stored_size_bytes": thumbnail_path.stat().st_size,
+                "integrity_validated_at": stored_at,
+            },
+        )
         episode.status = EpisodeStatus.RENDER_READY
         self.db.commit()
 
@@ -2371,12 +2583,21 @@ class PipelineService:
         *,
         estimated_incremental_cost: float | None = None,
         replace_existing_music: bool = False,
+        rebuild_render: bool = False,
     ) -> Job:
         if through_step not in STEP_ORDER:
             raise ValueError(f"Unknown pipeline step: {through_step}")
         if replace_existing_music and through_step != "music":
             raise ValueError(
                 "Existing music can only be replaced by a music job"
+            )
+        if rebuild_render and through_step != "qc":
+            raise ValueError(
+                "Derived media can only be rebuilt through the QC step"
+            )
+        if rebuild_render and replace_existing_music:
+            raise ValueError(
+                "Music replacement and render rebuilding are separate jobs"
             )
         now = datetime.now(timezone.utc)
         job: Job | None = None
@@ -2386,7 +2607,7 @@ class PipelineService:
                 # the SQLite process lock first also prevents a waiting session
                 # from pinning an obsolete read snapshot.
                 self._lock_episode(episode)
-                requested = (
+                requested = 0.0 if rebuild_render else (
                     self.estimate_job_incremental_cost(episode, through_step)
                     if estimated_incremental_cost is None
                     else max(0.0, float(estimated_incremental_cost))
@@ -2414,7 +2635,13 @@ class PipelineService:
                         "through_step",
                         "qc",
                     )
-                    if current_step != through_step:
+                    existing_rebuild = bool(
+                        existing.payload_json.get("rebuild_render")
+                    )
+                    if (
+                        current_step != through_step
+                        or existing_rebuild != rebuild_render
+                    ):
                         raise ActiveJobError(
                             f"Job {existing.id} is already active for "
                             f"{current_step}; cannot replace it with "
@@ -2478,8 +2705,16 @@ class PipelineService:
                         "through_step",
                         "qc",
                     )
+                    recovery_rebuild = bool(
+                        (latest_job.payload_json or {}).get(
+                            "rebuild_render"
+                        )
+                    )
                     if (
-                        recovery_step != through_step
+                        (
+                            recovery_step != through_step
+                            or recovery_rebuild != rebuild_render
+                        )
                         and not self._job_step_is_durably_complete(
                             episode,
                             latest_job,
@@ -2514,7 +2749,14 @@ class PipelineService:
                     episode_id=episode.id,
                     job_type="pipeline",
                     status=JobStatus.PENDING,
-                    payload_json={"through_step": through_step},
+                    payload_json={
+                        "through_step": through_step,
+                        **(
+                            {"rebuild_render": True}
+                            if rebuild_render
+                            else {}
+                        ),
+                    },
                 )
                 self.db.add(job)
                 self.db.flush()
@@ -2541,7 +2783,13 @@ class PipelineService:
             if existing is None:
                 raise
             current_step = existing.payload_json.get("through_step", "qc")
-            if current_step != through_step:
+            existing_rebuild = bool(
+                existing.payload_json.get("rebuild_render")
+            )
+            if (
+                current_step != through_step
+                or existing_rebuild != rebuild_render
+            ):
                 raise ActiveJobError(
                     f"Job {existing.id} is already active for {current_step}; "
                     f"cannot replace it with {through_step}"
@@ -2578,22 +2826,32 @@ class PipelineService:
             self.db.commit()
         try:
             through_step = job.payload_json.get("through_step", "qc")
-            self.assert_budget(episode)
-            self.assert_daily_budget(
-                self.estimate_job_incremental_cost(
-                    episode,
-                    through_step,
-                ),
-                reservation_job=job,
+            rebuild_render = bool(
+                job.payload_json.get("rebuild_render")
             )
+            if not rebuild_render:
+                self.assert_budget(episode)
+                self.assert_daily_budget(
+                    self.estimate_job_incremental_cost(
+                        episode,
+                        through_step,
+                    ),
+                    reservation_job=job,
+                )
             # Persist a backfilled reservation and release the transaction-level
             # advisory lock before any provider or FFmpeg work begins.
             self.db.commit()
-            self.run_through(
-                episode,
-                through_step,
-                progress_job=job,
-            )
+            if rebuild_render:
+                self.rebuild_render_and_qc(
+                    episode,
+                    progress_job=job,
+                )
+            else:
+                self.run_through(
+                    episode,
+                    through_step,
+                    progress_job=job,
+                )
             job.status = JobStatus.SUCCEEDED
             finished_at = datetime.now(timezone.utc)
             result = dict(job.result_json or {})

@@ -23,6 +23,7 @@ from app.services.pipeline import (
     PipelineService,
     ReferenceChangeConflictError,
 )
+from app.services.render import create_thumbnail
 from tests.test_pipeline import make_episode
 
 
@@ -118,6 +119,46 @@ def test_video_validation_rejects_large_corrupt_and_truncated_mp4(tmp_path: Path
     truncated.write_bytes(content[: len(content) // 2])
     assert truncated.stat().st_size > 1024
     assert is_valid_video(truncated) is False
+
+
+def test_thumbnail_uses_the_real_episode_video_not_generic_concept_art(
+    tmp_path: Path,
+):
+    source = tmp_path / "green-episode.mp4"
+    output = tmp_path / "episode-thumbnail.png"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=0x22cc66:s=1280x720:d=2",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "+faststart",
+            str(source),
+        ],
+        check=True,
+    )
+
+    create_thumbnail(
+        "Pappì fa confusione",
+        output,
+        source_video_path=source,
+    )
+
+    with Image.open(output) as thumbnail:
+        thumbnail.load()
+        assert thumbnail.size == (1280, 720)
+        red, green, blue = thumbnail.getpixel((1180, 360))
+        assert green > red * 2
+        assert green > blue * 1.5
 
 
 def test_asset_validation_and_orphan_recovery_reject_corrupt_mp4(tmp_path: Path):

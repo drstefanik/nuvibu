@@ -828,3 +828,55 @@ def test_music_ready_page_can_regenerate_only_after_cost_confirmation(
                 )
             )
         ) == 2
+
+
+def test_final_media_is_inline_and_can_be_rebuilt_without_provider_cost(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        monkeypatch.setattr(
+            main_module.settings,
+            "storage_root",
+            tmp_path / "storage",
+        )
+        main_module.settings.ensure_directories()
+        episode_url = _create_episode(
+            client,
+            title="Pappì fa confusione",
+        )
+        produced = client.post(
+            f"{episode_url}/run",
+            data={"through_step": "qc"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert produced.status_code == 303
+
+        detail = client.get(episode_url)
+        assert detail.status_code == 200
+        assert "CONCEPT PREVIEW" not in detail.text
+        assert "Ricostruisci video e copertina • $0" in detail.text
+        match = re.search(
+            r'<video controls playsinline preload="metadata" '
+            r'src="([^"]+)"',
+            detail.text,
+        )
+        assert match is not None
+        asset_url = match.group(1)
+
+        inline = client.get(asset_url)
+        assert inline.status_code == 200
+        assert inline.headers["content-disposition"].startswith("inline;")
+        ranged = client.get(
+            asset_url,
+            headers={"range": "bytes=0-1023"},
+        )
+        assert ranged.status_code == 206
+        assert ranged.headers["content-range"].startswith("bytes 0-1023/")
+        download = client.get(f"{asset_url}?download=true")
+        assert download.status_code == 200
+        assert download.headers["content-disposition"].startswith(
+            "attachment;"
+        )

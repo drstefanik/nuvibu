@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
+from PIL import (
+    Image,
+    ImageDraw,
+    ImageEnhance,
+    ImageFilter,
+    ImageFont,
+    ImageStat,
+)
 
 
 def _font(size: int, bold: bool = False):
@@ -149,56 +157,149 @@ def _wrap_title(title: str, max_chars: int = 15) -> str:
     return "\n".join(lines[:3])
 
 
-def create_thumbnail(title: str, output_path: Path, seed: int = 0, *, preview_label: bool = True) -> None:
-    """Build a premium mock thumbnail from approved Nuvibù concept art.
+def _video_duration_seconds(video_path: Path) -> float:
+    payload = probe(video_path)
+    duration = (payload.get("format") or {}).get("duration")
+    try:
+        parsed = float(duration)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            f"Video duration is unavailable for thumbnail source: {video_path}"
+        ) from exc
+    if parsed <= 0:
+        raise RuntimeError(
+            f"Video duration is invalid for thumbnail source: {video_path}"
+        )
+    return parsed
 
-    Production thumbnails should be generated and art-directed from the episode's final scene
-    references. This function deliberately avoids the old geometric placeholder mascot.
-    """
+
+def _extract_video_frame(
+    video_path: Path,
+    output_path: Path,
+    *,
+    timestamp_seconds: float,
+) -> None:
+    run(
+        [
+            "ffmpeg",
+            "-y",
+            "-loglevel",
+            "error",
+            "-ss",
+            f"{timestamp_seconds:.3f}",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-vf",
+            (
+                "scale=1280:720:force_original_aspect_ratio=increase,"
+                "crop=1280:720,setsar=1"
+            ),
+            str(output_path),
+        ]
+    )
+
+
+def _thumbnail_frame_score(image: Image.Image) -> float:
+    """Prefer a bright, colourful and sharp real episode frame."""
+
+    sample = image.resize((320, 180), Image.Resampling.BILINEAR)
+    grayscale = sample.convert("L")
+    edge_variance = ImageStat.Stat(
+        grayscale.filter(ImageFilter.FIND_EDGES)
+    ).var[0]
+    hsv = sample.convert("HSV")
+    saturation = ImageStat.Stat(hsv.getchannel("S")).mean[0]
+    brightness = ImageStat.Stat(grayscale).mean[0]
+    exposure_penalty = abs(brightness - 145.0) * 0.35
+    return edge_variance + saturation * 0.9 - exposure_penalty
+
+
+def _best_episode_frame(video_path: Path) -> Image.Image:
+    duration = _video_duration_seconds(video_path)
+    fractions = (0.18, 0.38, 0.58, 0.78)
+    with tempfile.TemporaryDirectory(prefix="nuvibu-thumbnail-") as temp_dir:
+        candidates: list[tuple[float, Image.Image]] = []
+        for index, fraction in enumerate(fractions):
+            timestamp = min(
+                max(0.25, duration * fraction),
+                max(0.25, duration - 0.25),
+            )
+            frame_path = Path(temp_dir) / f"frame-{index}.png"
+            _extract_video_frame(
+                video_path,
+                frame_path,
+                timestamp_seconds=timestamp,
+            )
+            with Image.open(frame_path) as frame:
+                loaded = frame.convert("RGB")
+                loaded.load()
+            candidates.append((_thumbnail_frame_score(loaded), loaded))
+        if not candidates:
+            raise RuntimeError(
+                f"No thumbnail frame could be extracted from {video_path}"
+            )
+        return max(candidates, key=lambda item: item[0])[1]
+
+
+def _title_gradient(size: tuple[int, int]) -> Image.Image:
+    width, height = size
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    solid_until = int(width * 0.34)
+    fade_until = int(width * 0.66)
+    for x in range(fade_until):
+        if x <= solid_until:
+            alpha = 210
+        else:
+            progress = (x - solid_until) / max(1, fade_until - solid_until)
+            alpha = round(210 * (1 - progress))
+        draw.line((x, 0, x, height), fill=(39, 15, 83, alpha))
+    return overlay
+
+
+def create_thumbnail(
+    title: str,
+    output_path: Path,
+    *,
+    source_video_path: Path,
+) -> None:
+    """Build a publish-ready thumbnail from the final episode itself."""
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    project_root = Path(__file__).resolve().parents[2]
-    normalized = title.casefold()
-    if "pulcin" in normalized or "color" in normalized:
-        source_path = project_root / "brand" / "concepts" / "pulcini-arcobaleno.png"
-        concept_has_title = True
-    elif "cuc" in normalized or "nuvol" in normalized:
-        source_path = project_root / "brand" / "concepts" / "cucu-dietro-la-nuvola.png"
-        concept_has_title = True
-    else:
-        source_path = project_root / "brand" / "source" / "nuvibu-key-art.png"
-        concept_has_title = False
-
-    if not source_path.exists():
-        raise FileNotFoundError(f"Thumbnail concept missing: {source_path}")
-
-    image = _cover(Image.open(source_path).convert("RGB"), (1280, 720))
-    image = ImageEnhance.Color(image).enhance(1.05)
-    image = ImageEnhance.Contrast(image).enhance(1.04)
+    image = _cover(_best_episode_frame(source_video_path), (1280, 720))
+    image = ImageEnhance.Color(image).enhance(1.12)
+    image = ImageEnhance.Contrast(image).enhance(1.07).convert("RGBA")
+    image = Image.alpha_composite(image, _title_gradient(image.size))
     draw = ImageDraw.Draw(image, "RGBA")
 
-    if not concept_has_title:
-        # Create a strong title panel for generic episodes.
-        overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
-        od = ImageDraw.Draw(overlay)
-        od.rounded_rectangle((44, 72, 720, 648), radius=42, fill=(47, 22, 96, 220))
-        overlay = overlay.filter(ImageFilter.GaussianBlur(0.4))
-        image = Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
-        draw = ImageDraw.Draw(image, "RGBA")
-        wrapped = _wrap_title(title)
-        font = _fit_text(draw, wrapped, 600, 96, minimum=54)
-        draw.multiline_text(
-            (84, 150), wrapped, font=font, fill=(255, 255, 255, 255),
-            spacing=8, stroke_width=4, stroke_fill=(91, 40, 166, 255),
-        )
-        draw.text((88, 555), "NUVIBÙ • CANZONI ORIGINALI", font=_font(27, bold=True), fill=(255, 222, 74, 255))
-
-    if preview_label:
-        # Keep mock outputs clearly separate from publish-ready creative.
-        label = "CONCEPT PREVIEW"
-        label_font = _font(22, bold=True)
-        bbox = draw.textbbox((0, 0), label, font=label_font)
-        width = bbox[2] - bbox[0]
-        x = 1280 - width - 54
-        draw.rounded_rectangle((x - 15, 24, 1258, 68), radius=14, fill=(24, 19, 55, 175))
-        draw.text((x, 33), label, font=label_font, fill=(255, 255, 255, 245))
-    image.save(output_path, quality=95)
+    draw.rounded_rectangle(
+        (54, 46, 438, 96),
+        radius=18,
+        fill=(255, 255, 255, 232),
+    )
+    draw.text(
+        (76, 57),
+        "NUVIBÙ  •  EMMA & FRIENDS",
+        font=_font(21, bold=True),
+        fill=(70, 29, 125, 255),
+    )
+    wrapped = _wrap_title(title, max_chars=14)
+    font = _fit_text(draw, wrapped, 540, 94, minimum=50)
+    draw.multiline_text(
+        (58, 170),
+        wrapped,
+        font=font,
+        fill=(255, 255, 255, 255),
+        spacing=6,
+        stroke_width=4,
+        stroke_fill=(70, 29, 125, 255),
+    )
+    draw.text(
+        (62, 626),
+        "UNA CANZONE ORIGINALE",
+        font=_font(26, bold=True),
+        fill=(255, 226, 83, 255),
+    )
+    image.convert("RGB").save(output_path, "PNG", optimize=True)
