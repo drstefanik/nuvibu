@@ -89,6 +89,27 @@ def test_production_budget_caps_keep_episode_at_40_and_daily_at_60():
     assert "MAX_DAILY_ESTIMATED_COST_USD=60" in deploy_script
 
 
+def test_cloud_run_web_service_keeps_capacity_ready():
+    deploy_script = (
+        Path(__file__).resolve().parents[1] / "deploy" / "cloud-run.sh"
+    ).read_text(encoding="utf-8")
+    web_deploy = deploy_script.split(
+        'gcloud run deploy "${WEB_SERVICE}"',
+        maxsplit=1,
+    )[1].split('SERVICE_URL="$(', maxsplit=1)[0]
+
+    assert "--min 1" in web_deploy
+    assert "--max 3" in web_deploy
+    assert "--min-instances default" in web_deploy
+    assert "--max-instances default" in web_deploy
+    assert "--concurrency 20" in web_deploy
+    assert "--cpu-boost" in web_deploy
+    assert "--min-instances 1" not in web_deploy
+    assert "--max-instances 3" not in web_deploy
+    assert "--min-instances 0" not in web_deploy
+    assert "--max-instances 1" not in web_deploy
+
+
 def test_complete_gemini_production_configuration_is_accepted(
     tmp_path: Path, monkeypatch
 ):

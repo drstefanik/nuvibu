@@ -54,6 +54,53 @@ def make_settings(
     return settings
 
 
+def test_display_cost_does_not_decode_existing_video_assets(
+    tmp_path: Path,
+    monkeypatch,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path, provider_mode="live")
+    with Session() as db:
+        episode = make_episode(8)
+        episode.storyboard_json = [
+            {
+                "index": 0,
+                "duration_seconds": 8,
+                "prompt": "Emma saluta lentamente",
+                "lyric_cue": "Ciao",
+            }
+        ]
+        db.add(episode)
+        db.commit()
+        scene = settings.asset_dir / episode.id / "scenes" / "scene-000.mp4"
+        scene.parent.mkdir(parents=True, exist_ok=True)
+        scene.write_bytes(b"present-but-not-decoded" * 256)
+        db.add(
+            Asset(
+                episode=episode,
+                kind=AssetKind.VIDEO_SCENE,
+                provider="test",
+                path=str(scene),
+                mime_type="video/mp4",
+                variant=1,
+                selected=True,
+            )
+        )
+        db.commit()
+        monkeypatch.setattr(
+            "app.services.pipeline.is_valid_video",
+            lambda _path: (_ for _ in ()).throw(
+                AssertionError("GET display path decoded a video")
+            ),
+        )
+
+        service = PipelineService(db, settings)
+        remaining = service.estimate_remaining_cost_for_display(episode)
+
+        assert remaining == service.estimate_cost(episode)
+        assert remaining > 0.02
+
+
 def test_pipeline_order_keeps_free_storyboard_before_paid_music(
     tmp_path: Path, monkeypatch
 ):
@@ -427,18 +474,19 @@ def test_music_regeneration_is_blocked_after_video_production_starts(
             duration_seconds=75,
             cost_usd=0.19,
         )
-        report = settings.asset_dir / episode.id / "qc.json"
-        report.write_text('{"passed": false}', encoding="utf-8")
+        scene = settings.asset_dir / episode.id / "scene-000.mp4"
+        scene.write_bytes(b"ledger row for interrupted paid video")
         db.add_all(
             [
                 old_asset,
                 Asset(
                     episode=episode,
-                    kind=AssetKind.REPORT,
-                    provider="qc",
-                    path=str(report),
-                    mime_type="application/json",
+                    kind=AssetKind.VIDEO_SCENE,
+                    provider="google-veo",
+                    path=str(scene),
+                    mime_type="video/mp4",
                     selected=True,
+                    cost_usd=1.6,
                 ),
             ]
         )

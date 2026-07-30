@@ -292,8 +292,12 @@ gcloud run deploy "${WEB_SERVICE}" \
   --cpu 1 \
   --memory 1Gi \
   --timeout 300 \
-  --min-instances 0 \
-  --max-instances 1 \
+  --min 1 \
+  --max 3 \
+  --min-instances default \
+  --max-instances default \
+  --concurrency 20 \
+  --cpu-boost \
   --allow-unauthenticated \
   --set-env-vars "${COMMON_ENV},RUNTIME_ROLE=web,CLOUD_RUN_JOB_NAME=${WORKER_JOB},CLOUD_RUN_JOB_LOCATION=${RUN_REGION},APP_BASE_URL=${INITIAL_APP_BASE_URL}" \
   --set-secrets "DATABASE_URL=database-url:${DATABASE_SECRET_VERSION},ADMIN_USERNAME=admin-username:${ADMIN_USERNAME_SECRET_VERSION},ADMIN_PASSWORD=admin-password:${ADMIN_PASSWORD_SECRET_VERSION},SECRET_KEY=app-secret-key:${APP_SECRET_VERSION}" \

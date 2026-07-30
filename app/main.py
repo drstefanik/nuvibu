@@ -821,7 +821,9 @@ def episode_detail(
             "music_regeneration_cost": (
                 service.estimate_music_regeneration_cost(episode)
             ),
-            "remaining_estimated_cost": service.estimate_remaining_cost(episode),
+            "remaining_estimated_cost": (
+                service.estimate_remaining_cost_for_display(episode)
+            ),
             "active_job": active_job,
             "active_job_retryable": active_job_retryable,
             "has_lyrics": bool(

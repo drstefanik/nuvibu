@@ -518,13 +518,19 @@ class PipelineService:
             AssetKind.SUBTITLES,
             AssetKind.REPORT,
         }
-        downstream = [
-            kind.value
-            for kind in downstream_kinds
-            if self.has_valid_asset(episode, kind)
-        ]
+        downstream = sorted(
+            {
+                kind.value
+                for kind in self.db.scalars(
+                    select(Asset.kind).where(
+                        Asset.episode_id == episode.id,
+                        Asset.kind.in_(downstream_kinds),
+                    )
+                )
+            }
+        )
         if downstream or episode.qc_json:
-            details = ", ".join(sorted(downstream)) or "quality report"
+            details = ", ".join(downstream) or "quality report"
             raise ReferenceChangeConflictError(
                 "Cannot regenerate music after video production has started: "
                 f"{details}"
@@ -620,6 +626,23 @@ class PipelineService:
         return round(
             self.estimate_music_cost(episode)
             + self._estimate_video_cost(episode, remaining_only=True),
+            2,
+        )
+
+    def estimate_remaining_cost_for_display(self, episode: Episode) -> float:
+        """Return a conservative UI estimate without decoding scene videos.
+
+        The display intentionally assumes every video scene still has to be
+        generated. The paid POST performs strict FFmpeg validation and can only
+        reduce this amount; it can never spend more than the amount shown.
+        """
+
+        return round(
+            self.estimate_music_cost(episode)
+            + self._estimate_video_cost(
+                episode,
+                remaining_only=False,
+            ),
             2,
         )
 

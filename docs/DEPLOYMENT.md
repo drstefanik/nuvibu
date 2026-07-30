@@ -60,7 +60,41 @@ Lo script:
 - configura `VEO_OUTPUT_GCS_URI` nello stesso bucket montato;
 - crea un job con una sola task, un'ora di timeout e zero retry automatici;
 - autorizza il web a eseguire quel job con l'ID esatto del job applicativo;
-- pubblica la console con login amministratore e sessione HTTPS sicura.
+- pubblica la console con login amministratore e sessione HTTPS sicura;
+- mantiene una istanza web pronta, abilita lo startup CPU boost e può
+  scalare fino a tre istanze, riducendo i 429 `Rate exceeded.` di Cloud Run
+  durante cold start o indisponibilità temporanee della singola istanza.
+
+Se una revisione precedente è già online con `min-instances=0` e
+`max-instances=1`, la correzione può essere applicata immediatamente senza
+ricompilare l'immagine. I limiti seguenti sono a livello di servizio, quindi
+restano complessivi anche durante il passaggio tra revisioni:
+
+```bash
+gcloud run services update nuvibu-web \
+  --project nuvibu \
+  --region us-central1 \
+  --min 1 \
+  --max 3 \
+  --min-instances default \
+  --max-instances default \
+  --concurrency 20 \
+  --cpu-boost
+```
+
+I due valori `default` rimuovono il precedente limite ereditato dalla
+revisione (`max-instances=1`), che altrimenti continuerebbe a prevalere sul
+limite di servizio.
+
+L'istanza minima comporta un costo infrastrutturale ricorrente di
+Cloud Run. Il limite giornaliero Nuvibù da 60 USD protegge invece la spesa dei
+provider di generazione e non include Cloud Run: mantenere anche un alert di
+fatturazione Google Cloud.
+
+Il blocco dei tentativi di login è una difesa aggiuntiva locale a ciascuna
+istanza. Con più repliche la protezione primaria resta la password
+amministrativa ad alta entropia in Secret Manager; un limite globale per IP
+richiede un load balancer con Cloud Armor o uno store condiviso.
 
 I retry Cloud Run sono intenzionalmente disattivati: la pipeline salva ogni
 asset completato e l'ID dell'operazione Veo, quindi una ripresa esplicita non
