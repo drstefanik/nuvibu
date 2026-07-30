@@ -44,7 +44,12 @@ from .prompts import (
     publish_metadata,
 )
 from .lyrics_engine import generate_song
-from .render import concatenate_scenes, create_thumbnail, make_vertical_short, mux_music
+from .render import (
+    concatenate_scenes,
+    create_thumbnail_variants,
+    make_vertical_short,
+    mux_music,
+)
 from .safety import review_episode
 
 
@@ -90,6 +95,17 @@ EDITABLE_DRAFT_ASSET_KINDS = {
     AssetKind.LYRICS,
     AssetKind.STORYBOARD,
     AssetKind.CHARACTER_REFERENCE,
+}
+EDITORIAL_QC_KEY = "editorial_qc_preflight"
+SOFT_EDITORIAL_QC_CHECKS = {
+    "catalog_originality",
+    "catalog_phrase_reuse",
+    "verb_variety",
+    "narrative_progression",
+    "lyrics_storyboard_coherence",
+    "meter",
+    "refrain_strength",
+    "age_clarity",
 }
 
 
@@ -314,7 +330,32 @@ class PipelineService:
         except OSError:
             return False
         if asset.mime_type.startswith("video/") or path.suffix.lower() == ".mp4":
-            return is_valid_video(path)
+            final_media = asset.kind in {
+                AssetKind.RENDER,
+                AssetKind.SHORT,
+            }
+            expected_duration = (
+                max(0.5, float(asset.duration_seconds or 0.0) * 0.9)
+                if final_media
+                else 0.0
+            )
+            video_valid = (
+                is_valid_video(
+                    path,
+                    minimum_duration_seconds=expected_duration,
+                    browser_compatible=True,
+                )
+                if final_media
+                else is_valid_video(path)
+            )
+            if not video_valid:
+                return False
+            expected_sha256 = (asset.metadata_json or {}).get(
+                "stored_sha256"
+            )
+            return not isinstance(expected_sha256, str) or (
+                file_sha256(path) == expected_sha256
+            )
         if asset.mime_type.startswith("image/") or path.suffix.lower() in {
             ".jpg",
             ".jpeg",
@@ -387,7 +428,20 @@ class PipelineService:
                 asset.mime_type.startswith("video/")
                 or path.suffix.lower() == ".mp4"
             ):
-                if is_streamable_video(path):
+                final_media = asset.kind in {
+                    AssetKind.RENDER,
+                    AssetKind.SHORT,
+                }
+                expected_duration = (
+                    max(0.5, float(asset.duration_seconds or 0.0) * 0.9)
+                    if final_media
+                    else 0.0
+                )
+                if is_streamable_video(
+                    path,
+                    minimum_duration_seconds=expected_duration,
+                    browser_compatible=final_media,
+                ):
                     return asset
                 continue
             if (
@@ -401,6 +455,49 @@ class PipelineService:
             if path.is_file() and path.stat().st_size > 0:
                 return asset
         return None
+
+    def thumbnail_candidates(self, episode: Episode) -> list[Asset]:
+        return [
+            asset
+            for asset in self._valid_assets(episode, AssetKind.THUMBNAIL)
+            if (
+                (asset.metadata_json or {}).get("thumbnail_source")
+                == "final_render_frame"
+                and not (asset.metadata_json or {}).get("preview_label")
+            )
+        ]
+
+    def select_thumbnail(
+        self,
+        episode: Episode,
+        thumbnail_id: str,
+    ) -> Asset:
+        self._lock_episode(episode)
+        if self.active_job(episode) is not None:
+            self.db.rollback()
+            raise ActiveJobError(
+                "Attendi il completamento del worker prima di cambiare "
+                "copertina."
+            )
+        candidates = self.thumbnail_candidates(episode)
+        selected = next(
+            (
+                asset
+                for asset in candidates
+                if asset.id == thumbnail_id
+            ),
+            None,
+        )
+        if selected is None:
+            self.db.rollback()
+            raise ReferenceChangeConflictError(
+                "La copertina scelta non appartiene alle varianti valide "
+                "di questo episodio."
+            )
+        for asset in self._assets(episode, AssetKind.THUMBNAIL):
+            asset.selected = asset.id == selected.id
+        self.db.commit()
+        return selected
 
     def validate_render_rebuild(self, episode: Episode) -> None:
         if episode.status in {
@@ -1290,6 +1387,8 @@ class PipelineService:
         approvals = dict(concept.get(CONTENT_APPROVALS_KEY) or {})
         for kind in kinds:
             approvals.pop(self._content_kind(kind), None)
+        if any(kind in {"lyrics", "storyboard"} for kind in kinds):
+            concept.pop(EDITORIAL_QC_KEY, None)
         if approvals:
             concept[CONTENT_APPROVALS_KEY] = approvals
         else:
@@ -1315,6 +1414,64 @@ class PipelineService:
             isinstance(approval, dict)
             and approval.get("fingerprint") == fingerprint
         )
+
+    def editorial_preflight(
+        self,
+        episode: Episode,
+        *,
+        refresh: bool = False,
+        commit: bool = True,
+    ) -> dict:
+        """Evaluate and freeze editorial QC before any paid provider call."""
+
+        fingerprint = self._content_fingerprint(episode, "storyboard")
+        if fingerprint is None:
+            raise ReferenceChangeConflictError(
+                "Testo o storyboard mancanti: il controllo editoriale "
+                "non può partire."
+            )
+        concept = dict(episode.concept_json or {})
+        existing = concept.get(EDITORIAL_QC_KEY)
+        if (
+            not refresh
+            and isinstance(existing, dict)
+            and existing.get("fingerprint") == fingerprint
+            and isinstance(existing.get("result"), dict)
+        ):
+            return existing
+
+        catalog = self._catalog_episodes(episode)
+        result = review_episode(
+            episode,
+            recent_episodes=catalog[:10],
+            catalog_episodes=catalog,
+            include_media=False,
+        )
+        snapshot = {
+            "fingerprint": fingerprint,
+            "reviewed_at": datetime.now(timezone.utc).isoformat(),
+            "result": result.to_dict(),
+        }
+        concept[EDITORIAL_QC_KEY] = snapshot
+        episode.concept_json = concept
+        if commit:
+            self.db.commit()
+        return snapshot
+
+    def require_editorial_preflight(self, episode: Episode) -> dict:
+        snapshot = self.editorial_preflight(episode)
+        result = snapshot["result"]
+        if not result.get("passed"):
+            findings = [
+                str(finding)
+                for finding in result.get("findings", [])
+                if str(finding).strip()
+            ]
+            raise ReferenceChangeConflictError(
+                "Il QC editoriale deve essere corretto prima di spendere: "
+                + (" • ".join(findings[:4]) if findings else "verifica fallita")
+            )
+        return snapshot
 
     def approve_content(self, episode: Episode, kind: str) -> str:
         """Approve the exact current lyrics or storyboard revision."""
@@ -1344,6 +1501,22 @@ class PipelineService:
             raise ReferenceChangeConflictError(
                 "Approve the current lyrics before the storyboard"
             )
+        if kind == "storyboard":
+            snapshot = self.editorial_preflight(
+                episode,
+                refresh=True,
+                commit=False,
+            )
+            if not snapshot["result"].get("passed"):
+                findings = [
+                    str(finding)
+                    for finding in snapshot["result"].get("findings", [])
+                ]
+                self.db.commit()
+                raise ReferenceChangeConflictError(
+                    "Correggi testo o storyboard prima dell'approvazione: "
+                    + " • ".join(findings[:4])
+                )
 
         concept = dict(episode.concept_json or {})
         approvals = dict(concept.get(CONTENT_APPROVALS_KEY) or {})
@@ -1355,6 +1528,87 @@ class PipelineService:
         episode.concept_json = concept
         self.db.commit()
         return fingerprint
+
+    def editorial_qc_override_available(self, episode: Episode) -> bool:
+        if not episode.qc_json or episode.qc_json.get("passed"):
+            return False
+        checks = episode.qc_json.get("checks")
+        if not isinstance(checks, dict):
+            return False
+        failed = {
+            str(name)
+            for name, passed in checks.items()
+            if not passed
+        }
+        if not failed or not failed <= SOFT_EDITORIAL_QC_CHECKS:
+            return False
+        return all(
+            self.selected_valid_asset(episode, kind) is not None
+            for kind in (
+                AssetKind.RENDER,
+                AssetKind.SHORT,
+                AssetKind.THUMBNAIL,
+            )
+        )
+
+    def override_failed_editorial_qc(self, episode: Episode) -> None:
+        """Record a human exception only for soft editorial findings."""
+
+        self._lock_episode(episode)
+        if self.active_job(episode) is not None:
+            self.db.rollback()
+            raise ActiveJobError(
+                "Attendi il completamento del worker prima della revisione QC."
+            )
+        if not self.editorial_qc_override_available(episode):
+            self.db.rollback()
+            raise ReferenceChangeConflictError(
+                "L'eccezione manuale è ammessa solo per rilievi editoriali; "
+                "sicurezza e integrità media devono superare il QC."
+            )
+        final_assets = {
+            kind: self.selected_valid_asset(episode, kind)
+            for kind in (
+                AssetKind.RENDER,
+                AssetKind.SHORT,
+                AssetKind.THUMBNAIL,
+            )
+        }
+        if any(asset is None for asset in final_assets.values()):
+            self.db.rollback()
+            raise ReferenceChangeConflictError(
+                "Ricostruisci prima video, Short e copertina: almeno un file "
+                "non supera la verifica di riproducibilità."
+            )
+
+        original = dict(episode.qc_json)
+        original_findings = [
+            str(finding)
+            for finding in original.get("findings", [])
+        ]
+        original["passed"] = True
+        original["automatic_passed"] = False
+        original["manual_override"] = {
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "original_score": int(original.get("score") or 0),
+            "accepted_findings": original_findings,
+            "scope": "soft_editorial_findings_only",
+        }
+        episode.qc_json = original
+        episode.status = EpisodeStatus.QC_REVIEW
+        reports = [
+            asset
+            for asset in self._valid_assets(episode, AssetKind.REPORT)
+            if asset.selected
+        ]
+        if reports:
+            report = reports[-1]
+            Path(report.path).write_text(
+                json.dumps(original, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            report.metadata_json = original
+        self.db.commit()
 
     def _draft_change_artifacts(self, episode: Episode) -> list[Path]:
         asset_root = self.settings.asset_dir / episode.id
@@ -1524,6 +1778,7 @@ class PipelineService:
                 raise RuntimeError(
                     "Approve the current storyboard before buying music"
                 )
+            self.require_editorial_preflight(episode)
         # Re-evaluate legacy/live assets created before the arrangement gate.
         # A paid but voice-only asset stays in the ledger and is deselected,
         # allowing an explicit retry to use a new immutable output path.
@@ -2277,6 +2532,8 @@ class PipelineService:
             raise RuntimeError(
                 "Approve the current storyboard before starting Veo"
             )
+        if self.settings.provider_mode == "live":
+            self.require_editorial_preflight(episode)
         references = self.reference_images(episode)
         if self.settings.provider_mode == "live" and not references:
             raise RuntimeError(
@@ -2421,7 +2678,10 @@ class PipelineService:
         stem = episode.working_slug
         final_path = out_dir / f"{stem}.mp4"
         short_path = out_dir / f"{stem}-short.mp4"
-        thumbnail_path = out_dir / f"{stem}-thumbnail.png"
+        thumbnail_paths = [
+            out_dir / f"{stem}-thumbnail-v{variant}.png"
+            for variant in range(1, 5)
+        ]
         # FFmpeg seeks while finalizing MP4 files. Render locally, then copy the
         # completed artifacts to the shared Cloud Storage mount.
         with tempfile.TemporaryDirectory(prefix=f"nuvibu-{episode.id}-") as temp_dir:
@@ -2429,7 +2689,10 @@ class PipelineService:
             silent_temp = temp_root / f"{stem}-silent.mp4"
             final_temp = temp_root / final_path.name
             short_temp = temp_root / short_path.name
-            thumbnail_temp = temp_root / thumbnail_path.name
+            thumbnail_temps = [
+                temp_root / thumbnail_path.name
+                for thumbnail_path in thumbnail_paths
+            ]
             planned_durations = {
                 int(scene["index"]) + 1: float(scene["duration_seconds"])
                 for scene in episode.storyboard_json
@@ -2442,29 +2705,71 @@ class PipelineService:
             )
             mux_music(silent_temp, Path(music.path), final_temp, episode.duration_seconds)
             make_vertical_short(final_temp, short_temp, min(25, episode.duration_seconds))
-            create_thumbnail(
-                episode.title,
-                thumbnail_temp,
-                source_video_path=final_temp,
+            recommended_thumbnail_index, thumbnail_diagnostics = (
+                create_thumbnail_variants(
+                    episode.title,
+                    thumbnail_temps,
+                    source_video_path=final_temp,
+                )
             )
-            if not is_valid_video(final_temp):
+            if not is_valid_video(
+                final_temp,
+                minimum_duration_seconds=max(
+                    0.5,
+                    episode.duration_seconds * 0.9,
+                ),
+                browser_compatible=True,
+            ):
                 raise RuntimeError(
                     "Final 16:9 render failed media integrity validation"
                 )
-            if not is_valid_video(short_temp):
+            if not is_valid_video(
+                short_temp,
+                minimum_duration_seconds=max(
+                    0.5,
+                    min(25, episode.duration_seconds) * 0.9,
+                ),
+                browser_compatible=True,
+            ):
                 raise RuntimeError(
                     "Vertical Short failed media integrity validation"
                 )
-            if not self._complete_image_file(thumbnail_temp):
+            if not all(
+                self._complete_image_file(thumbnail_temp)
+                for thumbnail_temp in thumbnail_temps
+            ):
                 raise RuntimeError(
-                    "Episode thumbnail failed image integrity validation"
+                    "At least one episode thumbnail failed image integrity "
+                    "validation"
                 )
             for source, destination in (
                 (final_temp, final_path),
                 (short_temp, short_path),
-                (thumbnail_temp, thumbnail_path),
+                *zip(thumbnail_temps, thumbnail_paths, strict=True),
             ):
                 self._copy_completed_file(source, destination)
+            if not is_valid_video(
+                final_path,
+                minimum_duration_seconds=max(
+                    0.5,
+                    episode.duration_seconds * 0.9,
+                ),
+                browser_compatible=True,
+            ):
+                raise RuntimeError(
+                    "Stored 16:9 render failed browser playback validation"
+                )
+            if not is_valid_video(
+                short_path,
+                minimum_duration_seconds=max(
+                    0.5,
+                    min(25, episode.duration_seconds) * 0.9,
+                ),
+                browser_compatible=True,
+            ):
+                raise RuntimeError(
+                    "Stored Short failed browser playback validation"
+                )
         stored_at = datetime.now(timezone.utc).isoformat()
         self._asset(
             episode,
@@ -2498,23 +2803,27 @@ class PipelineService:
                 "integrity_validated_at": stored_at,
             },
         )
-        self._asset(
-            episode,
-            kind=AssetKind.THUMBNAIL,
-            path=thumbnail_path,
-            mime_type="image/png",
-            provider="episode-frame-thumbnail-v2",
-            selected=True,
-            width=1280,
-            height=720,
-            metadata={
-                "thumbnail_source": "final_render_frame",
-                "preview_label": False,
-                "stored_sha256": file_sha256(thumbnail_path),
-                "stored_size_bytes": thumbnail_path.stat().st_size,
-                "integrity_validated_at": stored_at,
-            },
-        )
+        for index, thumbnail_path in enumerate(thumbnail_paths):
+            self._asset(
+                episode,
+                kind=AssetKind.THUMBNAIL,
+                path=thumbnail_path,
+                mime_type="image/png",
+                provider="episode-frame-thumbnail-v3",
+                variant=index + 1,
+                selected=index == recommended_thumbnail_index,
+                width=1280,
+                height=720,
+                metadata={
+                    "thumbnail_source": "final_render_frame",
+                    "preview_label": False,
+                    "recommended": index == recommended_thumbnail_index,
+                    **thumbnail_diagnostics[index],
+                    "stored_sha256": file_sha256(thumbnail_path),
+                    "stored_size_bytes": thumbnail_path.stat().st_size,
+                    "integrity_validated_at": stored_at,
+                },
+            )
         episode.status = EpisodeStatus.RENDER_READY
         self.db.commit()
 
@@ -2529,10 +2838,24 @@ class PipelineService:
             return
         self._remove_assets(episode, {AssetKind.REPORT})
         catalog = self._catalog_episodes(episode)
+        fingerprint = self._content_fingerprint(episode, "storyboard")
+        stored_preflight = (
+            (episode.concept_json or {}).get(EDITORIAL_QC_KEY)
+            if fingerprint is not None
+            else None
+        )
+        editorial_snapshot = (
+            stored_preflight.get("result")
+            if isinstance(stored_preflight, dict)
+            and stored_preflight.get("fingerprint") == fingerprint
+            and isinstance(stored_preflight.get("result"), dict)
+            else None
+        )
         result = review_episode(
             episode,
             recent_episodes=catalog[:10],
             catalog_episodes=catalog,
+            editorial_snapshot=editorial_snapshot,
         )
         episode.qc_json = result.to_dict()
         episode.status = EpisodeStatus.QC_REVIEW if result.passed else EpisodeStatus.FAILED

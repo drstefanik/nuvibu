@@ -121,6 +121,60 @@ def test_video_validation_rejects_large_corrupt_and_truncated_mp4(tmp_path: Path
     assert is_valid_video(truncated) is False
 
 
+def test_final_player_rejects_a_decodable_zero_length_render(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        tiny = tmp_path / "tiny-final.mp4"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=1280x720:d=0.08",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-movflags",
+                "+faststart",
+                str(tiny),
+            ],
+            check=True,
+        )
+        db.add(
+            Asset(
+                episode=episode,
+                kind=AssetKind.RENDER,
+                provider="broken-finalizer",
+                path=str(tiny),
+                mime_type="video/mp4",
+                duration_seconds=75,
+                selected=True,
+            )
+        )
+        db.commit()
+
+        service = PipelineService(db, settings)
+        assert service.selected_display_asset(
+            episode,
+            AssetKind.RENDER,
+        ) is None
+        assert service.selected_valid_asset(
+            episode,
+            AssetKind.RENDER,
+        ) is None
+
+
 def test_thumbnail_uses_the_real_episode_video_not_generic_concept_art(
     tmp_path: Path,
 ):

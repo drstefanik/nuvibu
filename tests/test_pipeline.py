@@ -2,17 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
 from app.media import is_valid_video
-from app.models import AssetKind, Episode, MetricSnapshot
+from app.models import AssetKind, Episode, EpisodeStatus, MetricSnapshot
 from app.schemas import EpisodeCreate
 from app.services.growth import calculate_growth_score
 from app.services.lyrics_engine import generate_song
-from app.services.pipeline import PipelineService, slugify
+from app.services.pipeline import (
+    PipelineService,
+    ReferenceChangeConflictError,
+    slugify,
+)
 from app.services.prompts import generate_lyrics, generate_storyboard, lyric_sections
 from app.services.safety import review_text
 
@@ -142,7 +147,14 @@ def test_complete_mock_pipeline_creates_all_outputs(tmp_path: Path):
             for asset in episode.assets
             if asset.kind == AssetKind.THUMBNAIL and asset.selected
         )
-        assert thumbnail.provider == "episode-frame-thumbnail-v2"
+        assert thumbnail.provider == "episode-frame-thumbnail-v3"
+        assert len(
+            [
+                asset
+                for asset in episode.assets
+                if asset.kind == AssetKind.THUMBNAIL
+            ]
+        ) == 4
         assert thumbnail.metadata_json["thumbnail_source"] == (
             "final_render_frame"
         )
@@ -213,7 +225,14 @@ def test_render_rebuild_reuses_paid_sources_and_repairs_final_media(
         assert rebuilt_render is not None
         assert is_valid_video(Path(rebuilt_render.path))
         assert rebuilt_thumbnail is not None
-        assert rebuilt_thumbnail.provider == "episode-frame-thumbnail-v2"
+        assert rebuilt_thumbnail.provider == "episode-frame-thumbnail-v3"
+        assert len(
+            [
+                asset
+                for asset in episode.assets
+                if asset.kind == AssetKind.THUMBNAIL
+            ]
+        ) == 4
         assert rebuilt_thumbnail.metadata_json["preview_label"] is False
         assert {
             asset.id
@@ -225,3 +244,103 @@ def test_render_rebuild_reuses_paid_sources_and_repairs_final_media(
         } == source_assets_before
         assert episode.actual_cost_usd == cost_before
         assert episode.qc_json["passed"] is True
+
+
+def test_soft_editorial_qc_can_be_overridden_without_touching_paid_assets(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "override.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{db_path}",
+        storage_root=tmp_path / "storage",
+        provider_mode="mock",
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode(16)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.run_through(episode, "qc")
+        asset_ids = {asset.id for asset in episode.assets}
+        checks = dict(episode.qc_json["checks"])
+        checks["catalog_phrase_reuse"] = False
+        checks["refrain_strength"] = False
+        episode.qc_json = {
+            **episode.qc_json,
+            "passed": False,
+            "score": 75,
+            "checks": checks,
+            "findings": [
+                "Riciclo eccessivo rispetto agli ultimi 10 episodi.",
+                "Il ritornello è assente o generico.",
+            ],
+        }
+        episode.status = EpisodeStatus.FAILED
+        db.commit()
+
+        assert service.editorial_qc_override_available(episode) is True
+        service.override_failed_editorial_qc(episode)
+        db.refresh(episode)
+
+        assert episode.qc_json["passed"] is True
+        assert episode.qc_json["automatic_passed"] is False
+        assert episode.qc_json["score"] == 75
+        assert episode.qc_json["manual_override"]["original_score"] == 75
+        assert episode.status == EpisodeStatus.QC_REVIEW
+        assert {asset.id for asset in episode.assets} == asset_ids
+
+
+def test_editorial_qc_blocks_storyboard_before_any_paid_asset(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "preflight.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{db_path}",
+        storage_root=tmp_path / "storage",
+        provider_mode="mock",
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.generate_lyrics(episode)
+        service.update_lyrics_draft(
+            episode,
+            (
+                "[Intro]\nCiao ciao, vieni a vedere!\n"
+                "[Ritornello]\nEmma, Emma, uno, due e tre,\n"
+                "batti le manine insieme a me."
+            ),
+        )
+        service.approve_content(episode, "lyrics")
+        service.generate_storyboard(episode)
+
+        with pytest.raises(
+            ReferenceChangeConflictError,
+            match="Correggi testo o storyboard",
+        ):
+            service.approve_content(episode, "storyboard")
+
+        assert not any(
+            asset.kind in {AssetKind.MUSIC, AssetKind.VIDEO_SCENE}
+            for asset in episode.assets
+        )
+        snapshot = episode.concept_json["editorial_qc_preflight"]
+        assert snapshot["result"]["passed"] is False

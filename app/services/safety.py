@@ -140,6 +140,8 @@ def review_episode(
     *,
     recent_episodes: Iterable[Episode] = (),
     catalog_episodes: Iterable[Episode] | None = None,
+    include_media: bool = True,
+    editorial_snapshot: dict | None = None,
 ) -> QCResult:
     recent = list(recent_episodes)
     catalog = list(catalog_episodes) if catalog_episodes is not None else recent
@@ -238,27 +240,31 @@ def review_episode(
         finding="Scene troppo rapide o storyboard mancante.",
     )
 
-    selected = {
-        asset.kind
-        for asset in episode.assets
-        if asset.selected and Path(asset.path).exists()
-    }
-    for kind, label in [
-        (AssetKind.MUSIC, "music"),
-        (AssetKind.RENDER, "main_render"),
-        (AssetKind.SHORT, "short"),
-        (AssetKind.THUMBNAIL, "thumbnail"),
-    ]:
-        present = kind in selected
-        _add_check(
-            checks,
-            check_scores,
-            findings,
-            name=label,
-            passed=present,
-            score=100 if present else 0,
-            finding=f"Asset obbligatorio mancante: {label}.",
-        )
+    media_findings: list[str] = []
+    if include_media:
+        selected = {
+            asset.kind
+            for asset in episode.assets
+            if asset.selected and Path(asset.path).exists()
+        }
+        for kind, label in [
+            (AssetKind.MUSIC, "music"),
+            (AssetKind.RENDER, "main_render"),
+            (AssetKind.SHORT, "short"),
+            (AssetKind.THUMBNAIL, "thumbnail"),
+        ]:
+            present = kind in selected
+            before = len(findings)
+            _add_check(
+                checks,
+                check_scores,
+                findings,
+                name=label,
+                passed=present,
+                score=100 if present else 0,
+                finding=f"Asset obbligatorio mancante: {label}.",
+            )
+            media_findings.extend(findings[before:])
 
     similarity = float(audit["max_similarity"])
     originality_score = max(0, round(100 - similarity * 140))
@@ -417,17 +423,13 @@ def review_episode(
         finding="Lessico o costruzione sintattica poco chiari per l'età indicata.",
     )
 
-    weights = {
+    editorial_weights = {
         "content_terms": 5,
         "prompt_guardrails": 4,
         "age_range": 2,
         "duration": 2,
         "format_bpm": 5,
         "scene_pacing": 4,
-        "music": 3,
-        "main_render": 3,
-        "short": 2,
-        "thumbnail": 2,
         "catalog_originality": 18,
         "catalog_phrase_reuse": 12,
         "verb_variety": 7,
@@ -436,6 +438,58 @@ def review_episode(
         "meter": 8,
         "refrain_strength": 8,
         "age_clarity": 4,
+    }
+    media_weights = {
+        "music": 3,
+        "main_render": 3,
+        "short": 2,
+        "thumbnail": 2,
+    }
+    if include_media and isinstance(editorial_snapshot, dict):
+        snapshot_checks = editorial_snapshot.get("checks")
+        snapshot_metrics = editorial_snapshot.get("metrics")
+        snapshot_scores = (
+            snapshot_metrics.get("component_scores")
+            if isinstance(snapshot_metrics, dict)
+            else None
+        )
+        snapshot_findings = editorial_snapshot.get("findings")
+        if (
+            isinstance(snapshot_checks, dict)
+            and isinstance(snapshot_scores, dict)
+            and isinstance(snapshot_findings, list)
+            and all(name in snapshot_checks for name in editorial_weights)
+            and all(name in snapshot_scores for name in editorial_weights)
+        ):
+            checks = {
+                **{
+                    name: bool(snapshot_checks[name])
+                    for name in editorial_weights
+                },
+                **{
+                    name: checks[name]
+                    for name in media_weights
+                },
+            }
+            check_scores = {
+                **{
+                    name: int(snapshot_scores[name])
+                    for name in editorial_weights
+                },
+                **{
+                    name: check_scores[name]
+                    for name in media_weights
+                },
+            }
+            findings = [
+                str(finding) for finding in snapshot_findings
+            ] + media_findings
+            snapshot_editorial = snapshot_metrics.get("editorial")
+            if isinstance(snapshot_editorial, dict):
+                audit = snapshot_editorial
+    weights = {
+        **editorial_weights,
+        **(media_weights if include_media else {}),
     }
     total_weight = sum(weights.values())
     score = round(
@@ -447,6 +501,7 @@ def review_episode(
         "editorial": audit,
         "component_scores": check_scores,
         "score_threshold": 85,
+        "phase": "final" if include_media else "editorial_preflight",
     }
     return QCResult(
         passed=passed,

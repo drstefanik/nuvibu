@@ -9,6 +9,7 @@ import numpy as np
 
 MUSIC_ANALYSIS_SAMPLE_RATE = 24_000
 MUSIC_MIN_LOW_BAND_ENERGY_RATIO = 0.001
+BROWSER_VIDEO_CODECS = {"h264", "avc1"}
 
 
 def _music_arrangement_metrics_from_samples(
@@ -121,12 +122,16 @@ def music_arrangement_quality(
         }
 
 
-def is_streamable_video(path: Path, *, probe_timeout_seconds: int = 30) -> bool:
-    """Return whether a browser can discover a real video stream and duration."""
+def video_stream_info(
+    path: Path,
+    *,
+    probe_timeout_seconds: int = 30,
+) -> dict | None:
+    """Return normalized metadata for the first real video stream."""
 
     try:
         if not path.is_file() or path.stat().st_size <= 1024:
-            return False
+            return None
         probe = subprocess.run(
             [
                 "ffprobe",
@@ -146,11 +151,11 @@ def is_streamable_video(path: Path, *, probe_timeout_seconds: int = 30) -> bool:
             timeout=probe_timeout_seconds,
         )
         if probe.returncode != 0:
-            return False
+            return None
         payload = json.loads(probe.stdout)
         streams = payload.get("streams")
         if not isinstance(streams, list) or not streams:
-            return False
+            return None
         stream = streams[0]
         if (
             stream.get("codec_type") != "video"
@@ -158,14 +163,30 @@ def is_streamable_video(path: Path, *, probe_timeout_seconds: int = 30) -> bool:
             or int(stream.get("width") or 0) <= 0
             or int(stream.get("height") or 0) <= 0
         ):
-            return False
+            return None
         durations = (
             stream.get("duration"),
             (payload.get("format") or {}).get("duration"),
         )
-        if not any(_positive_float(value) for value in durations):
-            return False
-        return True
+        duration = next(
+            (
+                float(value)
+                for value in durations
+                if _positive_float(value)
+            ),
+            0.0,
+        )
+        if duration <= 0:
+            return None
+        return {
+            "codec_name": str(stream["codec_name"]).casefold(),
+            "width": int(stream["width"]),
+            "height": int(stream["height"]),
+            "duration_seconds": duration,
+            "format_name": str(
+                (payload.get("format") or {}).get("format_name") or ""
+            ),
+        }
     except (
         OSError,
         ValueError,
@@ -173,14 +194,53 @@ def is_streamable_video(path: Path, *, probe_timeout_seconds: int = 30) -> bool:
         json.JSONDecodeError,
         subprocess.TimeoutExpired,
     ):
+        return None
+
+
+def is_streamable_video(
+    path: Path,
+    *,
+    minimum_duration_seconds: float = 0.0,
+    browser_compatible: bool = False,
+    probe_timeout_seconds: int = 30,
+) -> bool:
+    """Return whether a browser can discover a usable video and duration."""
+
+    info = video_stream_info(
+        path,
+        probe_timeout_seconds=probe_timeout_seconds,
+    )
+    if info is None:
         return False
+    if (
+        minimum_duration_seconds > 0
+        and float(info["duration_seconds"]) + 0.05
+        < minimum_duration_seconds
+    ):
+        return False
+    if (
+        browser_compatible
+        and str(info["codec_name"]) not in BROWSER_VIDEO_CODECS
+    ):
+        return False
+    return True
 
 
-def is_valid_video(path: Path, *, decode_timeout_seconds: int = 180) -> bool:
+def is_valid_video(
+    path: Path,
+    *,
+    minimum_duration_seconds: float = 0.0,
+    browser_compatible: bool = False,
+    decode_timeout_seconds: int = 180,
+) -> bool:
     """Return whether a file is complete and fully decodable."""
 
     try:
-        if not is_streamable_video(path):
+        if not is_streamable_video(
+            path,
+            minimum_duration_seconds=minimum_duration_seconds,
+            browser_compatible=browser_compatible,
+        ):
             return False
         decode = subprocess.run(
             [

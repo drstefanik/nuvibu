@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 from io import BytesIO
 from pathlib import Path
@@ -772,14 +773,17 @@ def test_music_ready_page_can_regenerate_only_after_cost_confirmation(
             headers={"origin": "http://testserver"},
             follow_redirects=False,
         ).status_code == 303
+        lyrics_page = client.get(episode_url)
+        lyrics_match = re.search(
+            r'<textarea[^>]+name="lyrics_text"[^>]*>(.*?)</textarea>',
+            lyrics_page.text,
+            flags=re.DOTALL,
+        )
+        assert lyrics_match is not None
+        generated_lyrics = html.unescape(lyrics_match.group(1)).strip()
         assert client.post(
             f"{episode_url}/lyrics/approve",
-            data={
-                "lyrics_text": (
-                    "[Intro]\nPio pio, eccoci qua!\n"
-                    "[Ritornello]\nSalta e canta con Nuvibù!"
-                )
-            },
+            data={"lyrics_text": generated_lyrics},
             headers={"origin": "http://testserver"},
             follow_redirects=False,
         ).status_code == 303
@@ -857,10 +861,12 @@ def test_final_media_is_inline_and_can_be_rebuilt_without_provider_cost(
         detail = client.get(episode_url)
         assert detail.status_code == 200
         assert "CONCEPT PREVIEW" not in detail.text
-        assert "Ricostruisci video e copertina • $0" in detail.text
+        assert "Ricostruisci video e 4 copertine • $0" in detail.text
+        assert "Scegli fra 4 fotogrammi reali" in detail.text
+        assert detail.text.count('class="thumbnail-choice') >= 4
         match = re.search(
-            r'<video controls playsinline preload="metadata" '
-            r'src="([^"]+)"',
+            r'<video controls playsinline preload="metadata"[^>]*>\s*'
+            r'<source src="([^"]+)" type="video/mp4">',
             detail.text,
         )
         assert match is not None
@@ -869,6 +875,7 @@ def test_final_media_is_inline_and_can_be_rebuilt_without_provider_cost(
         inline = client.get(asset_url)
         assert inline.status_code == 200
         assert inline.headers["content-disposition"].startswith("inline;")
+        assert inline.headers["accept-ranges"] == "bytes"
         ranged = client.get(
             asset_url,
             headers={"range": "bytes=0-1023"},
@@ -880,3 +887,22 @@ def test_final_media_is_inline_and_can_be_rebuilt_without_provider_cost(
         assert download.headers["content-disposition"].startswith(
             "attachment;"
         )
+        choices = re.findall(
+            rf'action="({re.escape(episode_url)}/thumbnail/'
+            r'[^"]+/select)"',
+            detail.text,
+        )
+        assert len(choices) == 4
+        changed = client.post(
+            choices[-1],
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+        assert changed.status_code == 303
+        selected_page = client.get(episode_url)
+        selected_card = re.search(
+            rf'<form class="thumbnail-choice '
+            rf'thumbnail-choice-selected" action="{re.escape(choices[-1])}"',
+            selected_page.text,
+        )
+        assert selected_card is not None
