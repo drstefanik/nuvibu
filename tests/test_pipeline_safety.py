@@ -596,6 +596,44 @@ def test_daily_budget_uses_rolling_asset_spend(tmp_path: Path):
             service.assert_daily_budget(2.01)
 
 
+def test_zero_daily_budget_limit_keeps_accounting_without_blocking(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path, provider_mode="live")
+    object.__setattr__(settings, "max_daily_estimated_cost_usd", 0.0)
+    with Session() as db:
+        historical_episode = make_episode()
+        historical_episode.working_slug = "unlimited-historical"
+        new_episode = make_episode()
+        new_episode.working_slug = "unlimited-new"
+        db.add_all([historical_episode, new_episode])
+        db.commit()
+        db.add(
+            Asset(
+                episode=historical_episode,
+                kind=AssetKind.MUSIC,
+                provider="test",
+                path=str(tmp_path / "historical.mp3"),
+                mime_type="audio/mpeg",
+                cost_usd=1000.0,
+                created_at=datetime.now(timezone.utc) - timedelta(hours=1),
+            )
+        )
+        db.commit()
+        service = PipelineService(db, settings)
+
+        service.assert_daily_budget(1000.0)
+        job = service.enqueue(
+            new_episode,
+            "music",
+            estimated_incremental_cost=1000.0,
+        )
+
+        assert job.payload_json[BUDGET_RESERVED_USD_KEY] == 1000.0
+        assert job.payload_json[BUDGET_ACTUAL_BASELINE_USD_KEY] == 0.0
+
+
 def test_enqueue_reserves_daily_budget_across_episodes_and_releases_on_failure(
     tmp_path: Path,
 ):

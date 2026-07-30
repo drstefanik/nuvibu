@@ -1012,6 +1012,19 @@ class PipelineService:
             )
         )
 
+    def _daily_budget_exceeded(
+        self,
+        *,
+        spent: float,
+        reserved: float,
+        incremental: float,
+    ) -> bool:
+        daily_limit = self._daily_limit()
+        return (
+            daily_limit > 0
+            and spent + reserved + incremental > daily_limit + 1e-9
+        )
+
     def _raise_daily_budget_error(
         self,
         *,
@@ -1069,9 +1082,10 @@ class PipelineService:
                 incremental - own_outstanding,
             )
             reserved_total = sum(outstanding.values())
-            if (
-                spent + reserved_total + unreserved_incremental
-                > self._daily_limit() + 1e-9
+            if self._daily_budget_exceeded(
+                spent=spent,
+                reserved=reserved_total,
+                incremental=unreserved_incremental,
             ):
                 self._raise_daily_budget_error(
                     spent=spent,
@@ -2418,9 +2432,10 @@ class PipelineService:
                     own_outstanding = outstanding.get(existing.id, 0.0)
                     additional = max(0.0, requested - own_outstanding)
                     reserved_total = sum(outstanding.values())
-                    if (
-                        spent + reserved_total + additional
-                        > self._daily_limit() + 1e-9
+                    if self._daily_budget_exceeded(
+                        spent=spent,
+                        reserved=reserved_total,
+                        incremental=additional,
                     ):
                         self._raise_daily_budget_error(
                             spent=spent,
@@ -2484,9 +2499,10 @@ class PipelineService:
                     now=now,
                 )
                 reserved_total = sum(outstanding.values())
-                if (
-                    spent + reserved_total + requested
-                    > self._daily_limit() + 1e-9
+                if self._daily_budget_exceeded(
+                    spent=spent,
+                    reserved=reserved_total,
+                    incremental=requested,
                 ):
                     self._raise_daily_budget_error(
                         spent=spent,
