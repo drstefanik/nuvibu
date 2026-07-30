@@ -7,7 +7,8 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
-from app.models import Episode, MetricSnapshot
+from app.media import is_valid_video
+from app.models import AssetKind, Episode, MetricSnapshot
 from app.schemas import EpisodeCreate
 from app.services.growth import calculate_growth_score
 from app.services.lyrics_engine import generate_song
@@ -136,3 +137,91 @@ def test_complete_mock_pipeline_creates_all_outputs(tmp_path: Path):
         assert selected["thumbnail"].exists()
         assert selected["report"].exists()
         assert selected["render"].stat().st_size > 10_000
+        thumbnail = next(
+            asset
+            for asset in episode.assets
+            if asset.kind == AssetKind.THUMBNAIL and asset.selected
+        )
+        assert thumbnail.provider == "episode-frame-thumbnail-v2"
+        assert thumbnail.metadata_json["thumbnail_source"] == (
+            "final_render_frame"
+        )
+        assert thumbnail.metadata_json["preview_label"] is False
+
+
+def test_render_rebuild_reuses_paid_sources_and_repairs_final_media(
+    tmp_path: Path,
+):
+    db_path = tmp_path / "rebuild.db"
+    engine = create_engine(
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{db_path}",
+        storage_root=tmp_path / "storage",
+        provider_mode="mock",
+        max_music_variants=1,
+    )
+    settings.ensure_directories()
+    with Session() as db:
+        episode = make_episode(16)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.run_through(episode, "qc")
+        source_assets_before = {
+            asset.id
+            for asset in episode.assets
+            if asset.kind in {
+                AssetKind.MUSIC,
+                AssetKind.VIDEO_SCENE,
+            }
+        }
+        cost_before = episode.actual_cost_usd
+        original_render = service.selected_valid_asset(
+            episode,
+            AssetKind.RENDER,
+        )
+        assert original_render is not None
+        Path(original_render.path).write_bytes(b"broken" * 1024)
+
+        repair_job = service.enqueue(
+            episode,
+            "qc",
+            estimated_incremental_cost=0.0,
+            rebuild_render=True,
+        )
+        assert repair_job.payload_json["rebuild_render"] is True
+        assert repair_job.payload_json["budget_reserved_usd"] == 0.0
+        service.process_job(repair_job)
+        db.refresh(episode)
+
+        assert repair_job.status.value == "succeeded"
+        assert repair_job.result_json["derived_media_rebuild"] is True
+        rebuilt_render = service.selected_valid_asset(
+            episode,
+            AssetKind.RENDER,
+        )
+        rebuilt_thumbnail = service.selected_valid_asset(
+            episode,
+            AssetKind.THUMBNAIL,
+        )
+        assert rebuilt_render is not None
+        assert is_valid_video(Path(rebuilt_render.path))
+        assert rebuilt_thumbnail is not None
+        assert rebuilt_thumbnail.provider == "episode-frame-thumbnail-v2"
+        assert rebuilt_thumbnail.metadata_json["preview_label"] is False
+        assert {
+            asset.id
+            for asset in episode.assets
+            if asset.kind in {
+                AssetKind.MUSIC,
+                AssetKind.VIDEO_SCENE,
+            }
+        } == source_assets_before
+        assert episode.actual_cost_usd == cost_before
+        assert episode.qc_json["passed"] is True

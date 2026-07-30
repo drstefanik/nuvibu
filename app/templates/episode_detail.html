@@ -36,6 +36,11 @@
     {% endif %}
   </div>
   {% if active_job_retryable %}
+  {% if active_job.payload_json.get('rebuild_render') %}
+  <form class="stage-actions" action="/episodes/{{ episode.id }}/render/rebuild" method="post">
+    <button class="button button-primary" type="submit">Riprova ricostruzione gratuita</button>
+  </form>
+  {% else %}
   <form class="stage-actions paid-stage" action="/episodes/{{ episode.id }}/run" method="post">
     <input type="hidden" name="through_step" value="{{ active_step }}">
     <input type="hidden" name="queued" value="true">
@@ -49,6 +54,7 @@
       {{ 'Riprova avvio worker' if active_job.status.value == 'pending' else 'Riprendi in sicurezza' }}
     </button>
   </form>
+  {% endif %}
   {% else %}
   <div class="stage-actions" role="status" aria-live="polite">
     <span class="status status-{{ active_job.status.value }}">{{ active_job.status.value }}</span>
@@ -125,6 +131,16 @@
   <div class="stage-actions">
     <a class="button button-primary" href="#character-reference">Carica reference pack</a>
   </div>
+
+  {% elif render_rebuild_recommended and render_rebuild_available %}
+  <div class="stage-copy">
+    <p class="eyebrow">RIPARAZIONE GRATUITA</p>
+    <h2 id="next-stage-title">Ricostruisci video e copertina</h2>
+    <p>Le scene e la musica sono già pronte. Il sistema rifarà soltanto MP4, Short, copertina e QC, senza nuove chiamate a pagamento.</p>
+  </div>
+  <form class="stage-actions" action="/episodes/{{ episode.id }}/render/rebuild" method="post">
+    <button class="button button-primary" type="submit">Ricostruisci • $0</button>
+  </form>
 
   {% elif has_qc and not episode.qc_json.get('passed') %}
   <div class="stage-copy">
@@ -473,31 +489,66 @@
   {% endif %}
 </section>
 
-{% if assets_by_kind.get('render') %}
+{% if main_render %}
 <section class="panel media-panel">
   <div class="panel-title">
     <div><p class="eyebrow">VIDEO PRINCIPALE</p><h2>Anteprima 16:9</h2></div>
-    <a class="button" href="/assets/{{ assets_by_kind.get('render')[0].id }}">Scarica MP4</a>
+    <a class="button" href="/assets/{{ main_render.id }}?download=true">Scarica MP4</a>
   </div>
-  <video controls preload="metadata" src="/assets/{{ assets_by_kind.get('render')[0].id }}"></video>
+  <video controls playsinline preload="metadata" src="/assets/{{ main_render.id }}"></video>
 </section>
 {% endif %}
 
-{% if assets_by_kind.get('short') %}
+{% if short_render or thumbnail %}
 <section class="detail-grid">
+  {% if short_render %}
   <article class="panel media-panel">
     <div class="panel-title">
       <div><p class="eyebrow">SHORT</p><h2>Anteprima 9:16</h2></div>
-      <a class="button" href="/assets/{{ assets_by_kind.get('short')[0].id }}">Scarica</a>
+      <a class="button" href="/assets/{{ short_render.id }}?download=true">Scarica</a>
     </div>
-    <video class="short-video" controls preload="metadata" src="/assets/{{ assets_by_kind.get('short')[0].id }}"></video>
+    <video class="short-video" controls playsinline preload="metadata" src="/assets/{{ short_render.id }}"></video>
   </article>
+  {% endif %}
+  {% if thumbnail %}
   <article class="panel">
     <div class="panel-title"><div><p class="eyebrow">THUMBNAIL</p><h2>Copertina</h2></div></div>
-    {% if assets_by_kind.get('thumbnail') %}
-    <img class="thumbnail-preview" src="/assets/{{ assets_by_kind.get('thumbnail')[0].id }}" alt="Thumbnail">
-    {% endif %}
+    <img class="thumbnail-preview" src="/assets/{{ thumbnail.id }}" alt="Thumbnail">
   </article>
+  {% endif %}
+</section>
+{% endif %}
+
+{% if render_rebuild_available %}
+<section class="panel render-rebuild-panel">
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">
+        {% if render_rebuild_recommended %}RIPARAZIONE DISPONIBILE{% else %}MONTAGGIO{% endif %}
+      </p>
+      <h2>
+        {% if render_rebuild_recommended %}
+        Ricostruisci video e copertina
+        {% else %}
+        Vuoi rifare soltanto il pacchetto finale?
+        {% endif %}
+      </h2>
+    </div>
+  </div>
+  <p class="muted">
+    Riutilizza le scene Veo e la musica già generate. Non effettua nuove
+    chiamate a pagamento e crea un MP4 verificato, lo Short e una copertina
+    ricavata da un fotogramma reale dell’episodio.
+  </p>
+  {% if not active_job %}
+  <form action="/episodes/{{ episode.id }}/render/rebuild" method="post">
+    <button class="button button-primary" type="submit">
+      Ricostruisci video e copertina • $0
+    </button>
+  </form>
+  {% else %}
+  <p class="locked-note">Il comando si sblocca al termine del worker attivo.</p>
+  {% endif %}
 </section>
 {% endif %}
 
