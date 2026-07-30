@@ -1,16 +1,25 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 from ipaddress import ip_address
 import secrets
 import tempfile
+import time
 from pathlib import Path
+from typing import BinaryIO
 from urllib.parse import quote, urlsplit
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select, text
@@ -71,6 +80,8 @@ app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 PUBLIC_PATHS = {"/health", "/healthz", "/readyz", "/login"}
 LOGIN_LIMITER = LoginAttemptLimiter(max_failures=5, window_seconds=300)
+MEDIA_STREAM_CHUNK_BYTES = 1024 * 1024
+MEDIA_RANGE_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
 def valid_console_session(request: Request) -> bool:
@@ -1549,16 +1560,44 @@ def upload_to_youtube(episode_id: str, db: Session = Depends(get_db)):
 @app.get("/assets/{asset_id}")
 def serve_asset(
     asset_id: str,
+    request: Request,
     download: bool = False,
     db: Session = Depends(get_db),
 ):
     asset = db.get(Asset, asset_id)
-    if asset is None or not Path(asset.path).exists():
+    if asset is None:
         raise HTTPException(status_code=404, detail="Asset not found")
+    path = Path(asset.path)
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Asset not found") from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Asset storage is temporarily unavailable",
+            headers={"Retry-After": "2"},
+        ) from exc
+    if not path.is_file() or stat_result.st_size <= 0:
+        raise HTTPException(status_code=404, detail="Asset not found")
+
+    is_streaming_media = (
+        asset.mime_type.startswith(("video/", "audio/"))
+        or path.suffix.lower() in {".mp4", ".mp3", ".m4a", ".wav"}
+    )
+    if is_streaming_media:
+        return stream_media_asset(
+            request=request,
+            path=path,
+            media_type=asset.mime_type,
+            file_size=stat_result.st_size,
+            download=download,
+        )
     return FileResponse(
-        asset.path,
+        path,
         media_type=asset.mime_type,
-        filename=Path(asset.path).name,
+        filename=path.name,
+        stat_result=stat_result,
         headers={
             "Accept-Ranges": "bytes",
             "Cache-Control": "private, no-store",
@@ -1566,6 +1605,174 @@ def serve_asset(
         content_disposition_type=(
             "attachment" if download else "inline"
         ),
+    )
+
+
+def _content_disposition(path: Path, *, download: bool) -> str:
+    disposition = "attachment" if download else "inline"
+    encoded = quote(path.name)
+    if encoded == path.name:
+        return f'{disposition}; filename="{path.name}"'
+    fallback = (
+        "".join(
+            character
+            for character in path.name
+            if character.isascii() and (character.isalnum() or character in "._-")
+        )
+        or "nuvibu-media"
+    )
+    return (
+        f'{disposition}; filename="{fallback}"; '
+        f"filename*=UTF-8''{encoded}"
+    )
+
+
+def _open_media_file(path: Path) -> BinaryIO:
+    """Open a Cloud Storage FUSE object before response headers are emitted."""
+
+    last_error: OSError | None = None
+    for attempt in range(3):
+        try:
+            file = path.open("rb")
+            file.read(1)
+            file.seek(0)
+            return file
+        except OSError as exc:
+            last_error = exc
+            if attempt < 2:
+                time.sleep(0.1 * (attempt + 1))
+    raise HTTPException(
+        status_code=503,
+        detail="Media is temporarily unavailable; retry the request",
+        headers={"Retry-After": "2"},
+    ) from last_error
+
+
+def _single_media_range(
+    header_value: str,
+    *,
+    file_size: int,
+) -> tuple[int, int]:
+    """Parse one byte range and cap each Cloud Run response at 8 MiB."""
+
+    if not header_value.startswith("bytes=") or "," in header_value:
+        raise HTTPException(
+            status_code=416,
+            detail="Only one byte range is supported",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    spec = header_value[6:].strip()
+    if "-" not in spec:
+        raise HTTPException(
+            status_code=416,
+            detail="Invalid byte range",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    start_text, end_text = spec.split("-", 1)
+    try:
+        if not start_text:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                raise ValueError
+            start = max(0, file_size - suffix_length)
+            requested_end = file_size - 1
+        else:
+            start = int(start_text)
+            requested_end = int(end_text) if end_text else file_size - 1
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=416,
+            detail="Invalid byte range",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        ) from exc
+    if (
+        start < 0
+        or start >= file_size
+        or requested_end < start
+    ):
+        raise HTTPException(
+            status_code=416,
+            detail="Requested byte range is not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    end = min(
+        requested_end,
+        file_size - 1,
+        start + MEDIA_RANGE_RESPONSE_BYTES - 1,
+    )
+    return start, end
+
+
+def _media_chunks(
+    file: BinaryIO,
+    *,
+    start: int,
+    length: int | None,
+) -> Iterator[bytes]:
+    try:
+        file.seek(start)
+        remaining = length
+        while remaining is None or remaining > 0:
+            read_size = (
+                MEDIA_STREAM_CHUNK_BYTES
+                if remaining is None
+                else min(MEDIA_STREAM_CHUNK_BYTES, remaining)
+            )
+            chunk = file.read(read_size)
+            if not chunk:
+                break
+            if remaining is not None:
+                remaining -= len(chunk)
+            yield chunk
+    finally:
+        file.close()
+
+
+def stream_media_asset(
+    *,
+    request: Request,
+    path: Path,
+    media_type: str,
+    file_size: int,
+    download: bool,
+) -> StreamingResponse:
+    """Stream large media without Cloud Run's buffered-response size cap."""
+
+    file = _open_media_file(path)
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": _content_disposition(
+            path,
+            download=download,
+        ),
+    }
+    range_header = request.headers.get("range")
+    if range_header:
+        try:
+            start, end = _single_media_range(
+                range_header,
+                file_size=file_size,
+            )
+        except HTTPException:
+            file.close()
+            raise
+        length = end - start + 1
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+        headers["Content-Length"] = str(length)
+        return StreamingResponse(
+            _media_chunks(file, start=start, length=length),
+            status_code=206,
+            media_type=media_type,
+            headers=headers,
+        )
+
+    # Intentionally omit Content-Length. Cloud Run then forwards a genuinely
+    # streamed response instead of buffering an MP4 that can exceed 32 MiB.
+    return StreamingResponse(
+        _media_chunks(file, start=0, length=None),
+        media_type=media_type,
+        headers=headers,
     )
 
 
