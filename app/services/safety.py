@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from ..models import AssetKind, Episode
-from .lyrics_engine import editorial_audit
+from .lyrics_engine import count_syllables, editorial_audit
 
 
 @dataclass(slots=True)
@@ -60,7 +60,29 @@ SIMPLE_CONNECTIVES = {
     "sopra",
     "sotto",
 }
+
+FORMAT_BPM_RANGES: dict[str, tuple[int, int]] = {
+    "animali_e_versi": (80, 125),
+    "colori_e_trasformazioni": (80, 125),
+    "baby_dance": (128, 155),
+    "cucu_e_sorpresa": (70, 120),
+    "storia_musicale": (70, 125),
+    "nanna": (60, 82),
+}
+
+NON_SUNG_SECTION_MARKERS = (
+    "parlato",
+    "spoken",
+    "vocoder",
+    "break",
+    "finale secco",
+    "effetti",
+    "sound effect",
+    "countdown",
+)
+
 WORD_RE = re.compile(r"[a-zà-öø-ÿ']+", re.IGNORECASE)
+SECTION_HEADER_RE = re.compile(r"^\s*\[([^\]]+)\]\s*$")
 
 
 def review_text(text: str) -> list[str]:
@@ -99,7 +121,7 @@ def _storyboard_has_progression(episode: Episode) -> bool:
         " ".join(
             WORD_RE.findall(str(scene.get("action", "")).casefold())
         )
-        for scene in episode.storyboard_json
+        for scene in (episode.storyboard_json or [])
     ]
     if len(actions) < 2:
         return bool(actions)
@@ -112,11 +134,80 @@ def _age_clarity(episode: Episode) -> bool:
     if not words:
         return False
     long_words = [word for word in words if len(word) >= 12]
-    connective_count = sum(word.casefold() in SIMPLE_CONNECTIVES for word in words)
+    connective_count = sum(
+        word.casefold() in SIMPLE_CONNECTIVES for word in words
+    )
     return (
         len(long_words) / len(words) <= 0.06
         and connective_count / len(words) <= 0.28
     )
+
+
+def _format_bpm_range(song_format: str) -> tuple[int, int]:
+    return FORMAT_BPM_RANGES.get(song_format, (70, 135))
+
+
+def _sung_meter_profile(lyrics: str) -> dict:
+    """Measure meter section by section, excluding spoken/SFX material.
+
+    Very short calls such as "BUM!" or "Sistema acceso!" are intentional
+    rhythmic cues, not sung verses. Comparing them with full lyrical lines
+    created false blocking failures for energetic baby-dance songs.
+    """
+
+    current_section = "testo"
+    skip_section = False
+    sections: dict[str, list[int]] = {}
+
+    for raw_line in lyrics.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        header_match = SECTION_HEADER_RE.match(line)
+        if header_match:
+            current_section = header_match.group(1).strip()
+            plain_header = current_section.casefold()
+            skip_section = any(
+                marker in plain_header
+                for marker in NON_SUNG_SECTION_MARKERS
+            )
+            continue
+
+        if skip_section:
+            continue
+
+        words = WORD_RE.findall(line)
+        if len(words) < 3:
+            continue
+
+        sections.setdefault(current_section, []).append(
+            count_syllables(line)
+        )
+
+    section_metrics: list[dict] = []
+    all_syllables: list[int] = []
+    for name, values in sections.items():
+        if not values:
+            continue
+        span = max(values) - min(values)
+        section_metrics.append(
+            {
+                "section": name,
+                "syllables": values,
+                "span": span,
+            }
+        )
+        all_syllables.extend(values)
+
+    return {
+        "syllables": all_syllables,
+        "sections": section_metrics,
+        "max_span": max(
+            (section["span"] for section in section_metrics),
+            default=0,
+        ),
+    }
 
 
 def _add_check(
@@ -144,7 +235,11 @@ def review_episode(
     editorial_snapshot: dict | None = None,
 ) -> QCResult:
     recent = list(recent_episodes)
-    catalog = list(catalog_episodes) if catalog_episodes is not None else recent
+    catalog = (
+        list(catalog_episodes)
+        if catalog_episodes is not None
+        else recent
+    )
     findings: list[str] = []
     checks: dict[str, bool] = {}
     check_scores: dict[str, int] = {}
@@ -156,29 +251,25 @@ def review_episode(
 
     prompts = [
         str(scene.get("prompt", "")).lower()
-        for scene in episode.storyboard_json
+        for scene in (episode.storyboard_json or [])
     ]
+    prompt_guardrails_ok = bool(prompts) and all(
+        "no flashing" in prompt and "no frightening" in prompt
+        for prompt in prompts
+    )
     _add_check(
         checks,
         check_scores,
         findings,
         name="prompt_guardrails",
-        passed=bool(prompts)
-        and all(
-            "no flashing" in prompt and "no frightening" in prompt
-            for prompt in prompts
-        ),
-        score=100
-        if prompts
-        and all(
-            "no flashing" in prompt and "no frightening" in prompt
-            for prompt in prompts
-        )
-        else 0,
+        passed=prompt_guardrails_ok,
+        score=100 if prompt_guardrails_ok else 0,
         finding="I prompt visivi non includono tutti i guardrail richiesti.",
     )
 
-    age_range_ok = 0 <= episode.age_min_months < episode.age_max_months <= 60
+    age_range_ok = (
+        0 <= episode.age_min_months < episode.age_max_months <= 60
+    )
     _add_check(
         checks,
         check_scores,
@@ -205,12 +296,10 @@ def review_episode(
         recent_episodes=recent,
         catalog_episodes=catalog,
     )
-    is_bedtime = audit["song_format"] == "nanna"
-    bpm_ok = (
-        60 <= episode.bpm <= 82
-        if is_bedtime
-        else 70 <= episode.bpm <= 125
-    )
+
+    song_format = str(audit["song_format"])
+    bpm_min, bpm_max = _format_bpm_range(song_format)
+    bpm_ok = bpm_min <= episode.bpm <= bpm_max
     _add_check(
         checks,
         check_scores,
@@ -219,17 +308,18 @@ def review_episode(
         passed=bpm_ok,
         score=100 if bpm_ok else 25,
         finding=(
-            "Il format Nanna richiede un BPM compreso tra 60 e 82."
-            if is_bedtime
-            else "BPM non coerente con il format editoriale."
+            f"Il format richiede un BPM compreso tra "
+            f"{bpm_min} e {bpm_max}; valore impostato: {episode.bpm}."
         ),
     )
 
     scene_durations = [
         int(scene.get("duration_seconds", 0))
-        for scene in episode.storyboard_json
+        for scene in (episode.storyboard_json or [])
     ]
-    scene_pacing_ok = bool(scene_durations) and min(scene_durations) >= 4
+    scene_pacing_ok = (
+        bool(scene_durations) and min(scene_durations) >= 4
+    )
     _add_check(
         checks,
         check_scores,
@@ -282,10 +372,11 @@ def review_episode(
         ),
     )
 
+    rhyme_overlap = int(audit["rhyme_pair_overlap"])
     phrase_reuse_ok = (
         len(audit["reused_phrases"]) <= 1
         and not audit["blocked_phrases"]
-        and int(audit["rhyme_pair_overlap"]) <= 1
+        and rhyme_overlap <= 3
         and len(audit["reused_storyboard_actions"]) <= 1
     )
     phrase_score = max(
@@ -293,21 +384,26 @@ def review_episode(
         100
         - max(0, len(audit["reused_phrases"]) - 1) * 35
         - len(audit["blocked_phrases"]) * 45
-        - max(0, int(audit["rhyme_pair_overlap"]) - 1) * 15
-        - max(0, len(audit["reused_storyboard_actions"]) - 1) * 20,
+        - max(0, rhyme_overlap - 1) * 8
+        - max(
+            0,
+            len(audit["reused_storyboard_actions"]) - 1,
+        )
+        * 20,
     )
     phrase_details: list[str] = []
-    if audit["reused_phrases"]:
+    if len(audit["reused_phrases"]) > 1:
         phrase_details.append(
             "frasi: " + "; ".join(audit["reused_phrases"][:3])
         )
     if audit["blocked_phrases"]:
         phrase_details.append(
-            "formule abusate: " + ", ".join(audit["blocked_phrases"])
+            "formule abusate: "
+            + ", ".join(audit["blocked_phrases"])
         )
-    if int(audit["rhyme_pair_overlap"]) > 1:
+    if rhyme_overlap > 3:
         phrase_details.append(
-            f"coppie di rime riprese: {audit['rhyme_pair_overlap']}"
+            f"coppie di rime riprese: {rhyme_overlap}"
         )
     if len(audit["reused_storyboard_actions"]) > 1:
         phrase_details.append(
@@ -323,7 +419,11 @@ def review_episode(
         score=phrase_score,
         finding=(
             "Riciclo eccessivo rispetto agli ultimi 10 episodi"
-            + (": " + " • ".join(phrase_details) if phrase_details else ".")
+            + (
+                ": " + " • ".join(phrase_details)
+                if phrase_details
+                else "."
+            )
         ),
     )
 
@@ -342,9 +442,9 @@ def review_episode(
         ),
     )
 
-    progression_ok = bool(audit["has_progression"]) and _storyboard_has_progression(
-        episode
-    )
+    progression_ok = bool(
+        audit["has_progression"]
+    ) and _storyboard_has_progression(episode)
     _add_check(
         checks,
         check_scores,
@@ -367,21 +467,27 @@ def review_episode(
         passed=storyboard_ok,
         score=100 if storyboard_ok else 0,
         finding=(
-            "Testo e storyboard non sono sincronizzati: almeno una scena non "
-            "ha un cue valido o un'azione leggibile."
+            "Testo e storyboard non sono sincronizzati: almeno una scena "
+            "non ha un cue valido o un'azione leggibile."
         ),
     )
 
-    syllables = list(audit["syllables"])
-    meter_span = int(audit["meter_span"])
+    meter_profile = _sung_meter_profile(
+        episode.lyrics_text or ""
+    )
+    syllables = list(meter_profile["syllables"])
+    meter_span = int(meter_profile["max_span"])
     meter_ok = (
         bool(syllables)
-        and all(4 <= value <= 18 for value in syllables)
-        and meter_span <= 12
+        and all(4 <= value <= 20 for value in syllables)
+        and meter_span <= 8
     )
     meter_penalty = (
-        sum(value < 4 or value > 18 for value in syllables) * 18
-        + max(0, meter_span - 8) * 4
+        sum(value < 4 or value > 20 for value in syllables) * 18
+        + sum(
+            max(0, int(section["span"]) - 4) * 4
+            for section in meter_profile["sections"]
+        )
     )
     _add_check(
         checks,
@@ -391,8 +497,9 @@ def review_episode(
         passed=meter_ok,
         score=max(0, 100 - meter_penalty),
         finding=(
-            "Metrica irregolare: rivedere lunghezza e accenti dei versi "
-            f"(escursione sillabica {meter_span})."
+            "Metrica irregolare nelle sezioni cantate: rivedere "
+            "lunghezza e accenti dei versi "
+            f"(escursione massima per sezione {meter_span})."
         ),
     )
 
@@ -407,8 +514,8 @@ def review_episode(
         passed=refrain_ok,
         score=100 if refrain_ok else 30,
         finding=(
-            "Il ritornello è assente o generico: deve nominare un elemento "
-            "specifico del personaggio o del tema."
+            "Il ritornello è assente o generico: deve nominare un "
+            "elemento specifico del personaggio o del tema."
         ),
     )
 
@@ -420,7 +527,10 @@ def review_episode(
         name="age_clarity",
         passed=clarity_ok,
         score=100 if clarity_ok else 45,
-        finding="Lessico o costruzione sintattica poco chiari per l'età indicata.",
+        finding=(
+            "Lessico o costruzione sintattica poco chiari per "
+            "l'età indicata."
+        ),
     )
 
     editorial_weights = {
@@ -445,6 +555,7 @@ def review_episode(
         "short": 2,
         "thumbnail": 2,
     }
+
     if include_media and isinstance(editorial_snapshot, dict):
         snapshot_checks = editorial_snapshot.get("checks")
         snapshot_metrics = editorial_snapshot.get("metrics")
@@ -458,8 +569,14 @@ def review_episode(
             isinstance(snapshot_checks, dict)
             and isinstance(snapshot_scores, dict)
             and isinstance(snapshot_findings, list)
-            and all(name in snapshot_checks for name in editorial_weights)
-            and all(name in snapshot_scores for name in editorial_weights)
+            and all(
+                name in snapshot_checks
+                for name in editorial_weights
+            )
+            and all(
+                name in snapshot_scores
+                for name in editorial_weights
+            )
         ):
             checks = {
                 **{
@@ -482,26 +599,39 @@ def review_episode(
                 },
             }
             findings = [
-                str(finding) for finding in snapshot_findings
+                str(finding)
+                for finding in snapshot_findings
             ] + media_findings
             snapshot_editorial = snapshot_metrics.get("editorial")
             if isinstance(snapshot_editorial, dict):
                 audit = snapshot_editorial
+
     weights = {
         **editorial_weights,
         **(media_weights if include_media else {}),
     }
     total_weight = sum(weights.values())
     score = round(
-        sum(check_scores[name] * weight for name, weight in weights.items())
+        sum(
+            check_scores[name] * weight
+            for name, weight in weights.items()
+        )
         / total_weight
     )
     passed = score >= 85 and not findings and all(checks.values())
+
+    audit = {
+        **audit,
+        "meter_sections": meter_profile["sections"],
+        "meter_span": meter_span,
+    }
     metrics = {
         "editorial": audit,
         "component_scores": check_scores,
         "score_threshold": 85,
-        "phase": "final" if include_media else "editorial_preflight",
+        "phase": (
+            "final" if include_media else "editorial_preflight"
+        ),
     }
     return QCResult(
         passed=passed,

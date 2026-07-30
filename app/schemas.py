@@ -15,7 +15,7 @@ class EpisodeCreate(BaseModel):
         max_length=6,
     )
     duration_seconds: int = Field(default=24, ge=15, le=600)
-    bpm: int = Field(default=92, ge=60, le=135)
+    bpm: int = Field(default=92, ge=60, le=160)
     visual_pacing: str = Field(default="gentle", pattern=r"^(gentle|medium|energetic)$")
     language: str = Field(default="it", pattern=r"^(it|en)$")
 

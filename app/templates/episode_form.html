@@ -16,7 +16,7 @@
     <label>Età minima<input type="number" name="age_min_months" value="9" min="0" max="48"></label>
     <label>Età massima<input type="number" name="age_max_months" value="48" min="1" max="60"></label>
     <label>Durata sec<input type="number" name="duration_seconds" value="75" min="30" max="{{ settings.max_episode_seconds }}"></label>
-    <label>BPM <small>Nanna: 60–82</small><input id="episode-bpm" type="number" name="bpm" value="112" min="60" max="135"></label>
+    <label>BPM <small id="bpm-guidance">Colori: 96–132</small><input id="episode-bpm" type="number" name="bpm" value="108" min="60" max="160"></label>
   </div>
   <div class="field-grid two">
     <label>Ritmo visivo<select name="visual_pacing"><option value="gentle" selected>Dolce: scene da circa 8 sec</option><option value="medium">Medio: scene da circa 6 sec</option><option value="energetic">Energico: scene da circa 5 sec</option></select></label>
@@ -29,18 +29,21 @@
   (() => {
     const format = document.getElementById("episode-format");
     const bpm = document.getElementById("episode-bpm");
+    const guidance = document.getElementById("bpm-guidance");
     const recommendations = {
-      "colori e trasformazioni": 108,
-      "animali e versi": 104,
-      "baby dance": 116,
-      "cucù e sorpresa": 94,
-      "storia musicale": 98,
-      "nanna": 72
+      "colori e trasformazioni": { value: 112, label: "Colori: 96–132" },
+      "animali e versi": { value: 110, label: "Animali: 92–128" },
+      "baby dance": { value: 145, label: "Baby dance: 128–155" },
+      "cucù e sorpresa": { value: 104, label: "Cucù: 86–122" },
+      "storia musicale": { value: 108, label: "Storia: 82–128" },
+      "nanna": { value: 72, label: "Nanna: 60–82" }
     };
     let bpmEdited = false;
     bpm.addEventListener("input", () => { bpmEdited = true; });
     format.addEventListener("change", () => {
-      if (!bpmEdited) bpm.value = recommendations[format.value] || 98;
+      const recommendation = recommendations[format.value] || recommendations["storia musicale"];
+      guidance.textContent = recommendation.label;
+      if (!bpmEdited) bpm.value = recommendation.value;
     });
   })();
 </script>
