@@ -77,16 +77,16 @@ def test_production_configuration_fails_closed_by_default():
     assert any("GEMINI_API_KEY" in error for error in gemini_worker_errors)
 
 
-def test_production_budget_caps_keep_episode_at_40_and_daily_at_60():
+def test_production_budget_keeps_episode_cap_and_disables_daily_cap():
     settings = Settings()
     deploy_script = (
         Path(__file__).resolve().parents[1] / "deploy" / "cloud-run.sh"
     ).read_text(encoding="utf-8")
 
     assert settings.max_estimated_cost_usd_per_episode == 40.0
-    assert settings.max_daily_estimated_cost_usd == 60.0
+    assert settings.max_daily_estimated_cost_usd == 0.0
     assert "MAX_ESTIMATED_COST_USD_PER_EPISODE=40" in deploy_script
-    assert "MAX_DAILY_ESTIMATED_COST_USD=60" in deploy_script
+    assert "MAX_DAILY_ESTIMATED_COST_USD=0" in deploy_script
 
 
 def test_cloud_run_web_service_keeps_capacity_ready():
