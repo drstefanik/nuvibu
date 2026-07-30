@@ -44,6 +44,7 @@ from .services.analytics import sync_youtube_metrics
 from .services.growth import calculate_growth_score, latest_metric
 from .services.pipeline import (
     ActiveJobError,
+    EDITORIAL_QC_KEY,
     PipelineService,
     REFERENCE_ROLE_LABELS,
     REFERENCE_ROLE_ORDER,
@@ -519,6 +520,10 @@ def validate_production_stage(
                 status_code=409,
                 detail="Approve the current storyboard before generating music",
             )
+        try:
+            service.require_editorial_preflight(episode)
+        except ReferenceChangeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if has_music:
             if not replace_existing_music:
                 raise HTTPException(
@@ -561,6 +566,10 @@ def validate_production_stage(
                     "(official Emma, episode friends and world) before rendering"
                 ),
             )
+        try:
+            service.require_editorial_preflight(episode)
+        except ReferenceChangeConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if has_qc:
             raise HTTPException(
                 status_code=409,
@@ -830,6 +839,7 @@ def episode_detail(
         episode,
         AssetKind.THUMBNAIL,
     )
+    thumbnail_candidates = service.thumbnail_candidates(episode)
     has_derived_media_rows = any(
         asset.kind
         in {
@@ -891,11 +901,18 @@ def episode_detail(
             "main_render": main_render,
             "short_render": short_render,
             "thumbnail": thumbnail,
+            "thumbnail_candidates": thumbnail_candidates,
             "render_rebuild_available": (
                 service.render_rebuild_available(episode)
             ),
             "render_rebuild_recommended": (
                 render_rebuild_recommended
+            ),
+            "qc_override_available": (
+                service.editorial_qc_override_available(episode)
+            ),
+            "editorial_preflight": (
+                (episode.concept_json or {}).get(EDITORIAL_QC_KEY)
             ),
             "jobs": jobs,
             "estimated_cost": estimated_cost,
@@ -1036,6 +1053,50 @@ def rebuild_render_form(
     else:
         PipelineService(db, settings).rebuild_render_and_qc(episode)
     return RedirectResponse(f"/episodes/{episode.id}", status_code=303)
+
+
+@app.post("/episodes/{episode_id}/qc/override")
+def override_editorial_qc_form(
+    episode_id: str,
+    accept_findings: bool = Form(False),
+    db: Session = Depends(get_db),
+):
+    if not accept_findings:
+        raise HTTPException(
+            status_code=400,
+            detail="Conferma esplicitamente i rilievi editoriali.",
+        )
+    episode = get_episode_or_404(db, episode_id)
+    try:
+        PipelineService(db, settings).override_failed_editorial_qc(
+            episode
+        )
+    except (ActiveJobError, ReferenceChangeConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}#quality-gate",
+        status_code=303,
+    )
+
+
+@app.post("/episodes/{episode_id}/thumbnail/{thumbnail_id}/select")
+def select_thumbnail_form(
+    episode_id: str,
+    thumbnail_id: str,
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    try:
+        PipelineService(db, settings).select_thumbnail(
+            episode,
+            thumbnail_id,
+        )
+    except (ActiveJobError, ReferenceChangeConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}#thumbnail-choice",
+        status_code=303,
+    )
 
 
 @app.post("/api/episodes/{episode_id}/run")
@@ -1498,6 +1559,10 @@ def serve_asset(
         asset.path,
         media_type=asset.mime_type,
         filename=Path(asset.path).name,
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, no-store",
+        },
         content_disposition_type=(
             "attachment" if download else "inline"
         ),

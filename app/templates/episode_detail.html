@@ -146,10 +146,24 @@
   <div class="stage-copy">
     <p class="eyebrow">PRODUZIONE ARRESTATA</p>
     <h2 id="next-stage-title">Il QC richiede revisione manuale</h2>
-    <p>Il report esistente non è stato superato. Nessun nuovo render può partire da questa schermata: controlla i rilievi e prepara un nuovo episodio corretto.</p>
+    <p>Scene e musica già pagate restano intatte. Puoi ricostruire gratuitamente i file finali; se i soli rilievi rimasti sono editoriali, puoi accettarli esplicitamente senza falsificare il punteggio automatico.</p>
   </div>
   <div class="stage-actions">
     <a class="button" href="#quality-gate">Vedi rilievi QC</a>
+    {% if render_rebuild_available %}
+    <form action="/episodes/{{ episode.id }}/render/rebuild" method="post">
+      <button class="button button-primary" type="submit">Ricostruisci video e 4 copertine • $0</button>
+    </form>
+    {% endif %}
+    {% if qc_override_available %}
+    <form class="qc-override-form" action="/episodes/{{ episode.id }}/qc/override" method="post">
+      <label class="confirm-check">
+        <input type="checkbox" name="accept_findings" value="true" required>
+        <span>Ho verificato video, testo e rilievi editoriali</span>
+      </label>
+      <button class="button button-success" type="submit">Accetta eccezione editoriale</button>
+    </form>
+    {% endif %}
   </div>
 
   {% elif not has_qc %}
@@ -332,16 +346,23 @@
         <h2>Controllo automatico</h2>
       </div>
     </div>
-    {% if episode.qc_json %}
-    <div class="qc-score {{ 'qc-pass' if episode.qc_json.get('passed') else 'qc-fail' }}">
-      <strong>{{ episode.qc_json.get('score',0) }}</strong><span>/100</span>
+    {% set qc_display = episode.qc_json if episode.qc_json else (editorial_preflight.get('result', {}) if editorial_preflight else {}) %}
+    {% if qc_display %}
+    <div class="qc-score {{ 'qc-pass' if qc_display.get('passed') else 'qc-fail' }}">
+      <strong>{{ qc_display.get('score',0) }}</strong><span>/100</span>
     </div>
-    {% if episode.qc_json.get('findings') %}
+    {% if episode.qc_json.get('manual_override') %}
+    <p class="notice"><strong>Eccezione editoriale accettata manualmente.</strong> Il punteggio automatico originale resta visibile; nessun controllo tecnico o di sicurezza è stato ignorato.</p>
+    {% endif %}
+    {% if qc_display.get('findings') %}
     <ul class="findings">
-      {% for finding in episode.qc_json.get('findings') %}<li>{{ finding }}</li>{% endfor %}
+      {% for finding in qc_display.get('findings') %}<li>{{ finding }}</li>{% endfor %}
     </ul>
     {% else %}
     <p class="good">Nessun rilievo strutturale. Serve comunque revisione editoriale umana.</p>
+    {% endif %}
+    {% if not episode.qc_json %}
+    <p class="muted"><strong>Controllo preliminare:</strong> eseguito prima di musica e video, così un difetto editoriale non può consumare crediti.</p>
     {% endif %}
     {% else %}
     <p class="muted">Il QC sarà disponibile soltanto dopo le approvazioni editoriali e il render.</p>
@@ -495,7 +516,11 @@
     <div><p class="eyebrow">VIDEO PRINCIPALE</p><h2>Anteprima 16:9</h2></div>
     <a class="button" href="/assets/{{ main_render.id }}?download=true">Scarica MP4</a>
   </div>
-  <video controls playsinline preload="metadata" src="/assets/{{ main_render.id }}"></video>
+  <video controls playsinline preload="metadata"{% if thumbnail %} poster="/assets/{{ thumbnail.id }}"{% endif %}>
+    <source src="/assets/{{ main_render.id }}" type="video/mp4">
+    Il browser non riesce a riprodurre questo MP4.
+  </video>
+  <p class="muted media-check-note">Il player mostra soltanto MP4 H.264 con durata e decodifica verificate. Se resta fermo, usa la ricostruzione gratuita qui sotto.</p>
 </section>
 {% endif %}
 
@@ -507,7 +532,9 @@
       <div><p class="eyebrow">SHORT</p><h2>Anteprima 9:16</h2></div>
       <a class="button" href="/assets/{{ short_render.id }}?download=true">Scarica</a>
     </div>
-    <video class="short-video" controls playsinline preload="metadata" src="/assets/{{ short_render.id }}"></video>
+    <video class="short-video" controls playsinline preload="metadata"{% if thumbnail %} poster="/assets/{{ thumbnail.id }}"{% endif %}>
+      <source src="/assets/{{ short_render.id }}" type="video/mp4">
+    </video>
   </article>
   {% endif %}
   {% if thumbnail %}
@@ -516,6 +543,36 @@
     <img class="thumbnail-preview" src="/assets/{{ thumbnail.id }}" alt="Thumbnail">
   </article>
   {% endif %}
+</section>
+{% endif %}
+
+{% if thumbnail_candidates|length > 1 %}
+<section class="panel" id="thumbnail-choice">
+  <div class="panel-title">
+    <div>
+      <p class="eyebrow">COPERTINA YOUTUBE</p>
+      <h2>Scegli fra 4 fotogrammi reali</h2>
+    </div>
+  </div>
+  <p class="muted">Il sistema consiglia la variante più leggibile, ma la scelta finale resta tua. Cambiare copertina non richiama Veo e non ha costi.</p>
+  <div class="thumbnail-choice-grid">
+    {% for candidate in thumbnail_candidates %}
+    <form class="thumbnail-choice{% if candidate.selected %} thumbnail-choice-selected{% endif %}" action="/episodes/{{ episode.id }}/thumbnail/{{ candidate.id }}/select" method="post">
+      <img src="/assets/{{ candidate.id }}" alt="Copertina {{ loop.index }}">
+      <div>
+        <strong>Variante {{ loop.index }}</strong>
+        {% if candidate.selected %}
+        <span class="status status-approved">in uso</span>
+        {% elif candidate.metadata_json.get('recommended') %}
+        <span class="status">consigliata</span>
+        {% endif %}
+      </div>
+      <button class="button{% if candidate.selected %} button-success{% endif %}" type="submit">
+        {{ 'Copertina selezionata' if candidate.selected else 'Usa questa' }}
+      </button>
+    </form>
+    {% endfor %}
+  </div>
 </section>
 {% endif %}
 
@@ -543,7 +600,7 @@
   {% if not active_job %}
   <form action="/episodes/{{ episode.id }}/render/rebuild" method="post">
     <button class="button button-primary" type="submit">
-      Ricostruisci video e copertina • $0
+      Ricostruisci video e 4 copertine • $0
     </button>
   </form>
   {% else %}

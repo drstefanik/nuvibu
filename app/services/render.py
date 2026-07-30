@@ -216,11 +216,13 @@ def _thumbnail_frame_score(image: Image.Image) -> float:
     return edge_variance + saturation * 0.9 - exposure_penalty
 
 
-def _best_episode_frame(video_path: Path) -> Image.Image:
+def _episode_frame_candidates(
+    video_path: Path,
+) -> list[tuple[float, float, Image.Image]]:
     duration = _video_duration_seconds(video_path)
     fractions = (0.18, 0.38, 0.58, 0.78)
     with tempfile.TemporaryDirectory(prefix="nuvibu-thumbnail-") as temp_dir:
-        candidates: list[tuple[float, Image.Image]] = []
+        candidates: list[tuple[float, float, Image.Image]] = []
         for index, fraction in enumerate(fractions):
             timestamp = min(
                 max(0.25, duration * fraction),
@@ -235,12 +237,21 @@ def _best_episode_frame(video_path: Path) -> Image.Image:
             with Image.open(frame_path) as frame:
                 loaded = frame.convert("RGB")
                 loaded.load()
-            candidates.append((_thumbnail_frame_score(loaded), loaded))
+            candidates.append(
+                (fraction, _thumbnail_frame_score(loaded), loaded)
+            )
         if not candidates:
             raise RuntimeError(
                 f"No thumbnail frame could be extracted from {video_path}"
             )
-        return max(candidates, key=lambda item: item[0])[1]
+        return candidates
+
+
+def _best_episode_frame(video_path: Path) -> Image.Image:
+    return max(
+        _episode_frame_candidates(video_path),
+        key=lambda item: item[1],
+    )[2]
 
 
 def _title_gradient(size: tuple[int, int]) -> Image.Image:
@@ -259,16 +270,13 @@ def _title_gradient(size: tuple[int, int]) -> Image.Image:
     return overlay
 
 
-def create_thumbnail(
+def _compose_thumbnail(
     title: str,
+    frame: Image.Image,
     output_path: Path,
-    *,
-    source_video_path: Path,
 ) -> None:
-    """Build a publish-ready thumbnail from the final episode itself."""
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    image = _cover(_best_episode_frame(source_video_path), (1280, 720))
+    image = _cover(frame, (1280, 720))
     image = ImageEnhance.Color(image).enhance(1.12)
     image = ImageEnhance.Contrast(image).enhance(1.07).convert("RGBA")
     image = Image.alpha_composite(image, _title_gradient(image.size))
@@ -303,3 +311,52 @@ def create_thumbnail(
         fill=(255, 226, 83, 255),
     )
     image.convert("RGB").save(output_path, "PNG", optimize=True)
+
+
+def create_thumbnail(
+    title: str,
+    output_path: Path,
+    *,
+    source_video_path: Path,
+) -> None:
+    """Build the automatically recommended episode thumbnail."""
+
+    _compose_thumbnail(
+        title,
+        _best_episode_frame(source_video_path),
+        output_path,
+    )
+
+
+def create_thumbnail_variants(
+    title: str,
+    output_paths: list[Path],
+    *,
+    source_video_path: Path,
+) -> tuple[int, list[dict[str, float]]]:
+    """Build four real-frame covers and return the recommended variant."""
+
+    candidates = _episode_frame_candidates(source_video_path)
+    if len(output_paths) != len(candidates):
+        raise ValueError(
+            f"Expected {len(candidates)} thumbnail output paths, "
+            f"received {len(output_paths)}"
+        )
+    diagnostics: list[dict[str, float]] = []
+    for output_path, (fraction, score, frame) in zip(
+        output_paths,
+        candidates,
+        strict=True,
+    ):
+        _compose_thumbnail(title, frame, output_path)
+        diagnostics.append(
+            {
+                "timestamp_fraction": fraction,
+                "frame_score": round(score, 4),
+            }
+        )
+    recommended_index = max(
+        range(len(candidates)),
+        key=lambda index: candidates[index][1],
+    )
+    return recommended_index, diagnostics
