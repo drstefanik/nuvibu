@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from ..models import Episode
+from .lyrics_engine import FORMAT_LABELS, generate_song, resolve_song_format
 
 
 SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
@@ -74,156 +75,42 @@ def lyric_sections(lyrics: str) -> list[tuple[str, list[str]]]:
     return sections
 
 
-def _is_rainbow_chicks(episode: Episode) -> bool:
-    brief = " ".join(
-        [
-            episode.title,
-            episode.theme,
-            episode.hook,
-            *episode.featured_characters,
-        ]
-    ).casefold()
-    return (
-        episode.language == "it"
-        and "color" in brief
-        and ("pulcin" in brief or "paperell" in brief)
-    )
-
-
-def _rainbow_chicks_lyrics(duration_seconds: int) -> str:
-    intro = (
-        "[Intro]\n"
-        "Pio pio, chi arriva di là?\n"
-        "Sette pulcini, eccoli qua!"
-    )
-    chorus = (
-        "[Ritornello]\n"
-        "Salta nella pozza: splash, splash, splash!\n"
-        "Ogni piuma cambia in un flash.\n"
-        "Rosso, giallo, verde e blu,\n"
-        "balla con i pulcini insieme ad Emma!"
-    )
-    verse_one = (
-        "[Strofa 1]\n"
-        "Rosso fa un saltino, giallo gira già,\n"
-        "verde apre le ali, blu li seguirà.\n"
-        "Uno, due, tre, guarda su:\n"
-        "quattro nuovi amici giocano con Emma!"
-    )
-    verse_two = (
-        "[Strofa 2]\n"
-        "Arancio fa una curva, viola vola in su,\n"
-        "rosa ride forte e poi scende giù.\n"
-        "Sette piccole ali, tutte a colori,\n"
-        "fanno un girotondo tra nuvole e fiori!"
-    )
-    bridge = (
-        "[Ponte]\n"
-        "Piano piano, la pioggia va via,\n"
-        "spunta nel cielo una scia di magia.\n"
-        "Conta i colori, uno dopo l'altro:\n"
-        "l'arcobaleno è sempre più alto!"
-    )
-    finale = (
-        "[Ritornello finale]\n"
-        "Salta nella pozza: splash, splash, splash!\n"
-        "Sette piume brillano in un flash.\n"
-        "Rosso, giallo, verde e blu,\n"
-        "arcobaleno insieme ad Emma, sempre più!"
-    )
-    if duration_seconds <= 45:
-        return "\n\n".join([intro, chorus, finale])
-    if duration_seconds <= 90:
-        return "\n\n".join(
-            [intro, chorus, verse_one, chorus, verse_two, finale]
-        )
-    return "\n\n".join(
-        [intro, chorus, verse_one, chorus, verse_two, bridge, finale]
-    )
-
-
 def generate_lyrics(episode: Episode) -> str:
-    """Create an original, duration-aware editorial draft.
+    """Create a catalog-aware draft when no database memory is available.
 
-    The draft deliberately uses short concrete lines, a narrative progression
-    and limited repetition for very young listeners. Editors can still change
-    every word before approval and paid music generation.
+    The production pipeline calls the same engine with the previous catalog.
+    Keeping this wrapper memory-free preserves the pure helper used by tests
+    and local tooling.
     """
-    if _is_rainbow_chicks(episode):
-        return _rainbow_chicks_lyrics(episode.duration_seconds)
 
-    words = [w.strip() for w in episode.target_words if w.strip()] or [
-        "cucù",
-        "ciao",
-        "nuvola",
-        "stella",
-    ]
-    words = words[:4]
-
-    if episode.language == "en":
-        refrain = (
-            "Emma, Emma, one, two, three,\n"
-            "clap your hands and dance with me.\n"
-            "Emma, Emma, turn around,\n"
-            "a little surprise is coming now!"
-        )
-        verses = []
-        for index, word in enumerate(words):
-            action = ["clap your hands", "wave hello", "jump up high", "turn around"][index % 4]
-            verses.append(
-                f"Look, look: {word} is here,\n"
-                "see it sparkle, bright and clear.\n"
-                f"{action.capitalize()}, count to three,\n"
-                f"{word}, {word}, sing with me!"
-            )
-        sections = [f"[Intro]\nHello, hello, come and see!", f"[Chorus]\n{refrain}"]
-        verse_limit = 1 if episode.duration_seconds <= 45 else min(2, len(verses))
-        for index, verse in enumerate(verses[:verse_limit], start=1):
-            sections.append(f"[Verse {index}]\n{verse}")
-            if index < verse_limit:
-                sections.append(f"[Chorus]\n{refrain}")
-        sections.append(f"[Final chorus]\n{refrain}")
-        return "\n\n".join(sections)
-
-    refrain = (
-        "Emma, Emma, uno, due e tre,\n"
-        "batti le manine insieme a me.\n"
-        "Emma, Emma, gira un po',\n"
-        "una nuova sorpresa arriverà!"
-    )
-    verses: list[str] = []
-    for index, word in enumerate(words):
-        action = [
-            "batti le manine",
-            "fai ciao con la manina",
-            "salta su e giù",
-            "gira piano e sorridi",
-        ][index % 4]
-        verses.append(
-            f"Guarda bene: {word} è qui,\n"
-            "brilla piano, proprio così.\n"
-            f"{action.capitalize()}, conta fino a tre,\n"
-            f"{word.capitalize()}, {word}, cantalo con me!"
-        )
-    sections = [
-        "[Intro]\nCiao ciao, vieni a vedere!",
-        f"[Ritornello]\n{refrain}",
-    ]
-    verse_limit = 1 if episode.duration_seconds <= 45 else min(2, len(verses))
-    for index, verse in enumerate(verses[:verse_limit], start=1):
-        sections.append(f"[Strofa {index}]\n{verse}")
-        if index < verse_limit:
-            sections.append(f"[Ritornello]\n{refrain}")
-    sections.append(f"[Ritornello finale]\n{refrain}")
-    return "\n\n".join(sections)
+    return generate_song(episode).lyrics
 
 
 def music_prompt(episode: Episode) -> str:
     language = "Italian" if episode.language == "it" else "English"
-    energy = "bright, bouncy and danceable" if episode.visual_pacing == "energetic" else "warm, playful and gently danceable"
+    generation = (episode.concept_json or {}).get(
+        "editorial_generation",
+        {},
+    )
+    song_format = str(
+        generation.get("format") or resolve_song_format(episode)
+    )
+    archetype = str(generation.get("archetype") or "micro-story")
+    if song_format == "nanna":
+        energy = (
+            "soft, slow and reassuring lullaby; sparse warm arrangement, "
+            "no dance groove, no sudden dynamic changes"
+        )
+    elif song_format == "baby_dance":
+        energy = "bright, physical and strongly danceable with clear movement cues"
+    elif episode.visual_pacing == "energetic":
+        energy = "bright, bouncy and danceable"
+    else:
+        energy = "warm, playful and gently danceable"
     return (
         f"Original {language} preschool song for ages {episode.age_min_months}–{episode.age_max_months} months. "
         f"Theme: {episode.theme}. Hook: {episode.hook}. Target words: {', '.join(episode.target_words)}. "
+        f"Editorial format: {FORMAT_LABELS.get(song_format, song_format)}. Narrative archetype: {archetype}. "
         f"{episode.bpm} BPM, {energy}, major key, immediate hook in the first three seconds, "
         "clear lead vocal, memorable chorus, call-and-response moments, toy percussion, claps, "
         "glockenspiel, warm bass and polished modern children's production. Keep every word intelligible. "
@@ -271,7 +158,7 @@ def generate_storyboard(episode: Episode) -> list[dict[str, Any]]:
     base_duration, remainder = divmod(episode.duration_seconds, count)
     lyrics = lyric_sections(episode.lyrics_text or generate_lyrics(episode))
     sung_lines = [line for _name, lines in lyrics for line in lines]
-    actions = [
+    default_actions = [
         "Open immediately on Emma's face as she parts two soft clouds and reveals her friends to camera",
         "Emma shows the story problem clearly, then notices the first magical clue with her friends",
         "Emma performs one simple action on the beat and triggers a transformation",
@@ -283,6 +170,17 @@ def generate_storyboard(episode: Episode) -> list[dict[str, Any]]:
         "Reveal Emma and the completed transformation in one wide, readable hero shot",
         "Finish with Emma centred, her friends waving and everyone holding the final rainbow pose",
     ]
+    generation = (episode.concept_json or {}).get(
+        "editorial_generation",
+        {},
+    )
+    saved_progression = generation.get("progression", [])
+    progression = [
+        str(action).strip()
+        for action in saved_progression
+        if str(action).strip()
+    ]
+    actions = progression or default_actions
     shots = [
         "wide establishing shot with a gentle push-in",
         "medium group shot at child eye level",
@@ -306,8 +204,12 @@ def generate_storyboard(episode: Episode) -> list[dict[str, Any]]:
             len(actions) - 1,
             round(index * (len(actions) - 1) / max(1, count - 1)),
         )
+        shot_index = min(
+            len(shots) - 1,
+            round(index * (len(shots) - 1) / max(1, count - 1)),
+        )
         action = actions[narrative_index]
-        shot = shots[narrative_index]
+        shot = shots[shot_index]
         cue_index = min(
             len(sung_lines) - 1,
             round(index * (len(sung_lines) - 1) / max(1, count - 1)),

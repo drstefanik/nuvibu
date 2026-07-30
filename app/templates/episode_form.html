@@ -5,7 +5,7 @@
 <form class="form-card" action="/episodes" method="post">
   <div class="field-grid two">
     <label>Titolo di lavoro<input name="title" value="Pulcini Arcobaleno" required></label>
-    <label>Format<select name="theme"><option value="colori e trasformazioni">Colori e trasformazioni</option><option value="animali e versi">Animali e versi</option><option value="baby dance">Baby dance</option><option value="cucù e sorpresa">Cucù e sorpresa</option><option value="storia musicale">Storia musicale</option><option value="nanna">Nanna</option></select></label>
+    <label>Format<select id="episode-format" name="theme"><option value="colori e trasformazioni">Colori e trasformazioni</option><option value="animali e versi">Animali e versi</option><option value="baby dance">Baby dance</option><option value="cucù e sorpresa">Cucù e sorpresa</option><option value="storia musicale">Storia musicale</option><option value="nanna">Nanna</option></select></label>
   </div>
   <label>Hook<input name="hook" value="Emma guida sette pulcini tra pozze magiche che cambiano colore" required></label>
   <div class="field-grid two top-gap">
@@ -16,7 +16,7 @@
     <label>Età minima<input type="number" name="age_min_months" value="9" min="0" max="48"></label>
     <label>Età massima<input type="number" name="age_max_months" value="48" min="1" max="60"></label>
     <label>Durata sec<input type="number" name="duration_seconds" value="75" min="30" max="{{ settings.max_episode_seconds }}"></label>
-    <label>BPM<input type="number" name="bpm" value="112" min="60" max="135"></label>
+    <label>BPM <small>Nanna: 60–82</small><input id="episode-bpm" type="number" name="bpm" value="112" min="60" max="135"></label>
   </div>
   <div class="field-grid two">
     <label>Ritmo visivo<select name="visual_pacing"><option value="gentle" selected>Dolce: scene da circa 8 sec</option><option value="medium">Medio: scene da circa 6 sec</option><option value="energetic">Energico: scene da circa 5 sec</option></select></label>
@@ -25,4 +25,23 @@
   <div class="notice"><strong>Standard Nuvibù — Emma &amp; Friends:</strong> Emma compare in ogni scena con reference ufficiale bloccata. 75 secondi è il formato consigliato; testo per sezioni, musica originale, storyboard sincronizzato e revisione umana integrale prima dell’upload.</div>
   <div class="form-actions"><a class="button" href="/">Annulla</a><button class="button button-primary" type="submit">Crea episodio</button></div>
 </form>
+<script>
+  (() => {
+    const format = document.getElementById("episode-format");
+    const bpm = document.getElementById("episode-bpm");
+    const recommendations = {
+      "colori e trasformazioni": 108,
+      "animali e versi": 104,
+      "baby dance": 116,
+      "cucù e sorpresa": 94,
+      "storia musicale": 98,
+      "nanna": 72
+    };
+    let bpmEdited = false;
+    bpm.addEventListener("input", () => { bpmEdited = true; });
+    format.addEventListener("change", () => {
+      if (!bpmEdited) bpm.value = recommendations[format.value] || 98;
+    });
+  })();
+</script>
 {% endblock %}

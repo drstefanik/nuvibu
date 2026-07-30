@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}{{ episode.title }}{% endblock %}
 {% block content %}
+{% set editorial = episode.concept_json.get('editorial_generation', {}) %}
 <a class="backlink" href="/">← Tutti gli episodi</a>
 
 <section class="detail-heading">
@@ -288,10 +289,24 @@
       <div><dt>Durata</dt><dd>{{ episode.duration_seconds }} secondi</dd></div>
       <div><dt>Tempo</dt><dd>{{ episode.bpm }} BPM</dd></div>
       <div><dt>Lingua</dt><dd>{{ episode.language|upper }}</dd></div>
+      {% if editorial %}
+      <div><dt>Format reale</dt><dd>{{ editorial.get('format_label', episode.theme) }}</dd></div>
+      <div><dt>Archetipo scelto</dt><dd>{{ editorial.get('archetype_label', '—') }}</dd></div>
+      {% endif %}
     </dl>
     <div class="tags top-gap">
       {% for word in episode.target_words %}<span>{{ word }}</span>{% endfor %}
     </div>
+    {% if editorial.get('candidates') %}
+    <div class="top-gap">
+      <p class="muted"><strong>Selezione interna:</strong> quattro concept confrontati per originalità, cantabilità, energia e coerenza.</p>
+      <div class="tags">
+        {% for candidate in editorial.get('candidates', []) %}
+        <span>{{ candidate.get('archetype_label') }} • {{ candidate.get('scores', {}).get('total', 0) }}/100{% if candidate.get('rejected') %} • scartato{% endif %}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
   </article>
 
   <article class="panel" id="quality-gate">
