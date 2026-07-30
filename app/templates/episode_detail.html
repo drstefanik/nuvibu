@@ -513,8 +513,12 @@
 {% if main_render %}
 <section class="panel media-panel">
   <div class="panel-title">
-    <div><p class="eyebrow">VIDEO PRINCIPALE</p><h2>Anteprima 16:9</h2></div>
-    <a class="button" href="/assets/{{ main_render.id }}?download=true">Scarica MP4</a>
+    <div>
+      <p class="eyebrow">VIDEO PRINCIPALE UNITO</p>
+      <h2>Video completo 16:9</h2>
+      <small class="muted">Tutte le scene montate con la traccia musicale finale.</small>
+    </div>
+    <a class="button button-primary" href="/assets/{{ main_render.id }}?download=true">Scarica video completo</a>
   </div>
   <video controls playsinline preload="metadata"{% if thumbnail %} poster="/assets/{{ thumbnail.id }}"{% endif %}>
     <source src="/assets/{{ main_render.id }}" type="video/mp4">

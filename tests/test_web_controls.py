@@ -861,6 +861,8 @@ def test_final_media_is_inline_and_can_be_rebuilt_without_provider_cost(
         detail = client.get(episode_url)
         assert detail.status_code == 200
         assert "CONCEPT PREVIEW" not in detail.text
+        assert "VIDEO PRINCIPALE UNITO" in detail.text
+        assert "Scarica video completo" in detail.text
         assert "Ricostruisci video e 4 copertine • $0" in detail.text
         assert "Scegli fra 4 fotogrammi reali" in detail.text
         assert detail.text.count('class="thumbnail-choice') >= 4
@@ -886,6 +888,32 @@ def test_final_media_is_inline_and_can_be_rebuilt_without_provider_cost(
         assert download.status_code == 200
         assert download.headers["content-disposition"].startswith(
             "attachment;"
+        )
+        assert "content-length" not in download.headers
+
+        main_path = next(
+            path
+            for path in (tmp_path / "storage" / "renders").rglob("*.mp4")
+            if not path.name.endswith("-short.mp4")
+        )
+        with main_path.open("ab") as media_file:
+            media_file.truncate(
+                main_module.MEDIA_RANGE_RESPONSE_BYTES
+                + main_module.MEDIA_STREAM_CHUNK_BYTES
+            )
+        open_ended_range = client.get(
+            asset_url,
+            headers={"range": "bytes=0-"},
+        )
+        assert open_ended_range.status_code == 206
+        assert len(open_ended_range.content) == (
+            main_module.MEDIA_RANGE_RESPONSE_BYTES
+        )
+        assert open_ended_range.headers["content-length"] == str(
+            main_module.MEDIA_RANGE_RESPONSE_BYTES
+        )
+        assert open_ended_range.headers["content-range"].startswith(
+            "bytes 0-8388607/"
         )
         choices = re.findall(
             rf'action="({re.escape(episode_url)}/thumbnail/'
