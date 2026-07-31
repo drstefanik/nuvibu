@@ -122,15 +122,12 @@ class VeoProvider:
                 "Veo operation sidecar belongs to a different backend or model; "
                 f"refusing to start a duplicate paid generation: {sidecar}"
             )
-        if state.get("request_fingerprint") != request_fingerprint:
-            raise RuntimeError(
-                "Veo operation sidecar belongs to a different scene request; "
-                f"refusing to reuse or replace it automatically: {sidecar}"
-            )
         if state.get("state") == "terminal_error":
             # Google documents that failed Veo generations are not charged.
-            # Preserve the failure until the next explicit pipeline attempt,
-            # then permit that attempt to submit a fresh operation.
+            # Preserve the failure as an audit artifact, then permit a fresh
+            # request.  This check deliberately precedes the fingerprint guard:
+            # a policy-rejected prompt may be retried with a safer prompt while
+            # an accepted/running operation must still match exactly.
             operation = str(state.get("operation_name", "unknown"))
             operation_hash = hashlib.sha256(operation.encode("utf-8")).hexdigest()[:12]
             archive = output_path.with_name(
@@ -141,6 +138,11 @@ class VeoProvider:
             else:
                 os.replace(sidecar, archive)
             return None
+        if state.get("request_fingerprint") != request_fingerprint:
+            raise RuntimeError(
+                "Veo operation sidecar belongs to a different scene request; "
+                f"refusing to reuse or replace it automatically: {sidecar}"
+            )
         operation_name = state.get("operation_name") or state.get("operation")
         if not isinstance(operation_name, str) or not operation_name:
             raise RuntimeError(
