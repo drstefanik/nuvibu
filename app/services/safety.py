@@ -62,11 +62,11 @@ SIMPLE_CONNECTIVES = {
 }
 
 FORMAT_BPM_RANGES: dict[str, tuple[int, int]] = {
-    "animali_e_versi": (80, 125),
-    "colori_e_trasformazioni": (80, 125),
+    "animali_e_versi": (80, 128),
+    "colori_e_trasformazioni": (80, 132),
     "baby_dance": (128, 155),
-    "cucu_e_sorpresa": (70, 120),
-    "storia_musicale": (70, 125),
+    "cucu_e_sorpresa": (70, 122),
+    "storia_musicale": (70, 128),
     "nanna": (60, 82),
 }
 

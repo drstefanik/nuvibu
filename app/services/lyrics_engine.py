@@ -123,30 +123,92 @@ ANIMAL_SOUNDS = {
     "pappi": "cra cra",
 }
 
-KNOWN_VERBS = (
-    "apre",
-    "aspetta",
-    "balla",
-    "batte",
-    "cerca",
-    "chiude",
-    "corre",
-    "dondola",
-    "gira",
-    "guarda",
-    "indica",
-    "mescola",
-    "nasconde",
-    "prova",
-    "raccoglie",
-    "ride",
-    "salta",
-    "scivola",
-    "spinge",
-    "spunta",
-    "tocca",
-    "vola",
+# The editorial gate is a lightweight heuristic, but it still needs to
+# recognise normal Italian inflections.  Matching only the third-person
+# present form (for example ``salta``) rejected perfectly visual lyrics using
+# ``saltano`` or ``salterà``.  Canonical stems plus a conservative suffix list
+# keep the catalogue memory stable while covering the forms used by lyrics and
+# storyboard directions.
+KNOWN_VISUAL_VERB_STEMS = (
+    ("alzare", "alz"),
+    ("aprire", "apr"),
+    ("aspettare", "aspett"),
+    ("attivare", "attiv"),
+    ("ballare", "ball"),
+    ("battere", "batt"),
+    ("brillare", "brill"),
+    ("cambiare", "cambi"),
+    ("cercare", "cerc"),
+    ("chiudere", "chiud"),
+    ("colorare", "color"),
+    ("comparire", "compar"),
+    ("correre", "corr"),
+    ("dipingere", "diping"),
+    ("dondolare", "dondol"),
+    ("esplodere", "esplod"),
+    ("fischiare", "fischi"),
+    ("girare", "gir"),
+    ("guardare", "guard"),
+    ("indicare", "indic"),
+    ("lasciare", "lasci"),
+    ("mescolare", "mescol"),
+    ("nascondere", "nascond"),
+    ("partire", "part"),
+    ("premere", "prem"),
+    ("provare", "prov"),
+    ("raccogliere", "raccogli"),
+    ("ridere", "rid"),
+    ("rivelare", "rivel"),
+    ("saltare", "salt"),
+    ("scattare", "scatt"),
+    ("scivolare", "scivol"),
+    ("sfiorare", "sfior"),
+    ("spingere", "sping"),
+    ("spuntare", "spunt"),
+    ("spruzzare", "spruzz"),
+    ("toccare", "tocc"),
+    ("trasformare", "trasform"),
+    ("volare", "vol"),
 )
+
+VISUAL_VERB_SUFFIXES = {
+    "a",
+    "ano",
+    "ate",
+    "ato",
+    "ati",
+    "ava",
+    "avano",
+    "e",
+    "era",
+    "erai",
+    "eranno",
+    "eremo",
+    "erete",
+    "ete",
+    "eva",
+    "evano",
+    "i",
+    "iamo",
+    "ira",
+    "irai",
+    "iranno",
+    "iremo",
+    "irete",
+    "isce",
+    "iscono",
+    "ite",
+    "ito",
+    "iti",
+    "iva",
+    "ivano",
+    "o",
+    "ono",
+    "uta",
+    "ute",
+    "uti",
+    "uto",
+}
 
 SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
 WORD_RE = re.compile(r"[a-zà-öø-ÿ0-9']+", re.IGNORECASE)
@@ -294,12 +356,16 @@ def _structure(lyrics: str) -> tuple[str, ...]:
     return tuple(_plain(name) for name, _lines in _sections(lyrics))
 
 
-def _verbs(lyrics: str) -> list[str]:
-    normalized = f" {_normalized_text(lyrics)} "
+def _verbs(text: str) -> list[str]:
+    words = set(WORD_RE.findall(_plain(text)))
     return [
-        verb
-        for verb in KNOWN_VERBS
-        if f" {verb} " in normalized
+        canonical
+        for canonical, stem in KNOWN_VISUAL_VERB_STEMS
+        if any(
+            word.startswith(stem)
+            and word[len(stem):] in VISUAL_VERB_SUFFIXES
+            for word in words
+        )
     ]
 
 
@@ -2182,7 +2248,11 @@ def editorial_audit(
     ]
     word_counts = [len(WORD_RE.findall(line)) for line in lines]
     syllables = [count_syllables(line) for line in lines]
-    verbs = _verbs(lyrics)
+    storyboard_actions = "\n".join(
+        str(scene.get("action", ""))
+        for scene in (episode.storyboard_json or [])
+    )
+    verbs = _verbs(f"{lyrics}\n{storyboard_actions}")
     unique_verbs = set(verbs)
     sections = _sections(lyrics)
     verse_sections = [
