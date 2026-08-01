@@ -107,6 +107,94 @@ def test_music_direction_field_is_prefilled_and_persists(
         assert direction in detail.text
 
 
+def test_storyboard_is_editable_and_saves_every_scene_field(
+    tmp_path: Path,
+    monkeypatch,
+):
+    with configured_client(tmp_path, monkeypatch) as client:
+        _login(client)
+        episode_url = _create_episode(client, title="Storyboard editabile")
+        assert client.post(
+            f"{episode_url}/run",
+            data={"through_step": "lyrics"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+        lyrics_page = client.get(episode_url)
+        lyrics_match = re.search(
+            r'<textarea[^>]+name="lyrics_text"[^>]*>(.*?)</textarea>',
+            lyrics_page.text,
+            flags=re.DOTALL,
+        )
+        assert lyrics_match is not None
+        lyrics = html.unescape(lyrics_match.group(1)).strip()
+        assert client.post(
+            f"{episode_url}/lyrics/approve",
+            data={"lyrics_text": lyrics},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+        assert client.post(
+            f"{episode_url}/run",
+            data={"through_step": "storyboard"},
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        ).status_code == 303
+
+        page = client.get(episode_url)
+        assert page.status_code == 200
+        assert 'class="storyboard-edit-form"' in page.text
+        assert 'name="scene_duration_seconds"' in page.text
+        assert 'name="scene_word"' in page.text
+        assert 'name="scene_lyric_cue"' in page.text
+        assert 'name="scene_action"' in page.text
+        assert 'name="scene_shot"' in page.text
+        assert "Salva e approva storyboard" in page.text
+
+        def input_values(name: str) -> list[str]:
+            return [
+                html.unescape(value)
+                for value in re.findall(
+                    rf'<input[^>]+name="{name}"[^>]+value="([^"]*)"',
+                    page.text,
+                )
+            ]
+
+        actions = [
+            html.unescape(value).strip()
+            for value in re.findall(
+                r'<textarea name="scene_action"[^>]*>(.*?)</textarea>',
+                page.text,
+                flags=re.DOTALL,
+            )
+        ]
+        words = input_values("scene_word")
+        actions[0] = "Emma accende una stella dorata e sorride agli amici"
+        words[0] = "stella dorata"
+        saved = client.post(
+            f"{episode_url}/storyboard",
+            data={
+                "scene_index": input_values("scene_index"),
+                "scene_duration_seconds": input_values(
+                    "scene_duration_seconds"
+                ),
+                "scene_word": words,
+                "scene_lyric_cue": input_values("scene_lyric_cue"),
+                "scene_action": actions,
+                "scene_shot": input_values("scene_shot"),
+            },
+            headers={"origin": "http://testserver"},
+            follow_redirects=False,
+        )
+
+        assert saved.status_code == 303
+        assert saved.headers["location"] == f"{episode_url}#storyboard-review"
+        persisted = client.get(episode_url)
+        assert "Emma accende una stella dorata" in persisted.text
+        assert 'value="stella dorata"' in persisted.text
+        assert "Rivedi e approva le scene" in persisted.text
+
+
 def test_episode_page_has_exactly_eighteen_clickable_emma_looks(
     tmp_path: Path,
     monkeypatch,

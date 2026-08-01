@@ -83,6 +83,23 @@
 .review-form{margin-top:18px}
 .review-form textarea{min-height:360px;resize:vertical;font:500 14px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
 .review-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:12px}
+.storyboard-edit-form{margin-top:16px}
+.storyboard-help{margin:0 0 14px}
+.storyboard-editor{display:grid;gap:14px;max-height:760px;padding-right:6px}
+.storyboard-editor li{grid-template-columns:105px minmax(0,1fr);gap:16px;padding:17px;border:1px solid var(--line);border-radius:16px;background:#fafbfe}
+.storyboard-scene-meta{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:6px}
+.storyboard-scene-meta>strong{font-size:13px}
+.storyboard-scene-meta>span{font-size:11px;color:var(--accent);font-weight:900}
+.storyboard-scene-meta label{width:100%;margin-top:8px;font-size:11px;color:var(--muted)}
+.input-with-unit{display:flex;align-items:center;gap:6px;margin-top:6px}
+.input-with-unit input{min-width:0;margin:0;padding:9px;text-align:center}
+.input-with-unit small{font-size:10px;color:var(--muted)}
+.storyboard-scene-fields{display:grid;gap:12px;min-width:0}
+.storyboard-fields-row{display:grid;grid-template-columns:minmax(120px,.7fr) minmax(220px,1.3fr);gap:12px}
+.storyboard-scene-fields input,.storyboard-scene-fields textarea{margin-top:6px;background:#fff}
+.storyboard-scene-fields textarea{resize:vertical;line-height:1.45}
+.storyboard-total{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;padding:12px 14px;border-radius:12px;background:#f4f2ff;color:#565b72;font-size:13px}
+.storyboard-total strong{color:var(--ink)}
 .approval-form{margin-top:16px;padding:16px;border:1px solid #d9e9e2;border-radius:14px;background:#f2faf6}
 .approval-form p{margin:0 0 12px;color:#4c625a;font-size:13px;line-height:1.5}
 .upload-form label:first-child{flex:1;min-width:230px}
@@ -133,4 +150,8 @@
   .upload-form{display:flex;flex-direction:column;align-items:stretch}
   .upload-form .button{margin-top:0}
   .review-actions .button,.approval-form .button{width:100%}
+  .storyboard-editor li{grid-template-columns:1fr;padding:14px}
+  .storyboard-scene-meta{display:grid;grid-template-columns:1fr auto;align-items:center}
+  .storyboard-scene-meta label{grid-column:1/-1;margin-top:2px}
+  .storyboard-fields-row{grid-template-columns:1fr}
 }

@@ -133,7 +133,7 @@ def music_prompt(episode: Episode) -> str:
     )
 
 
-def _scene_prompt(
+def scene_prompt(
     episode: Episode,
     scene_index: int,
     word: str,
@@ -239,7 +239,7 @@ def generate_storyboard(episode: Episode) -> list[dict[str, Any]]:
                 "lyric_cue": lyric_cue,
                 "action": action,
                 "shot": shot,
-                "prompt": _scene_prompt(
+                "prompt": scene_prompt(
                     episode,
                     index,
                     word,

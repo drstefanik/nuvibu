@@ -226,6 +226,88 @@ def test_updating_unpaid_lyrics_invalidates_storyboard_and_approvals(
         assert all(not path.exists() for path in old_storyboard_paths)
 
 
+def test_updating_storyboard_rebuilds_timing_prompt_and_approval(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(16)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.generate_lyrics(episode)
+        service.generate_storyboard(episode)
+        service.approve_content(episode, "lyrics")
+        service.approve_content(episode, "storyboard")
+        old_storyboard_paths = {
+            Path(asset.path)
+            for asset in episode.assets
+            if asset.kind == AssetKind.STORYBOARD
+        }
+
+        edited = [dict(scene) for scene in episode.storyboard_json]
+        edited[0]["duration_seconds"] = 9
+        edited[1]["duration_seconds"] = 7
+        edited[0]["word"] = "stella dorata"
+        edited[0]["action"] = "Emma solleva una stella dorata verso la camera"
+        edited[0]["shot"] = "medium hero shot with a gentle push-in"
+
+        asset = service.update_storyboard_draft(episode, edited)
+
+        assert Path(asset.path).is_file()
+        assert asset.provider == "user-edited-storyboard"
+        assert episode.storyboard_json[0]["start_seconds"] == 0
+        assert episode.storyboard_json[1]["start_seconds"] == 9
+        assert episode.storyboard_json[0]["word"] == "stella dorata"
+        assert "Emma solleva una stella dorata" in (
+            episode.storyboard_json[0]["prompt"]
+        )
+        assert "medium hero shot" in episode.storyboard_json[0]["prompt"]
+        assert service.content_is_approved(episode, "lyrics")
+        assert not service.content_is_approved(episode, "storyboard")
+        assert all(not path.exists() for path in old_storyboard_paths)
+
+
+def test_storyboard_edit_rejects_wrong_total_or_downstream_assets(
+    tmp_path: Path,
+):
+    Session = make_session(tmp_path)
+    settings = make_settings(tmp_path)
+    with Session() as db:
+        episode = make_episode(16)
+        db.add(episode)
+        db.commit()
+        service = PipelineService(db, settings)
+        service.generate_lyrics(episode)
+        service.generate_storyboard(episode)
+        original = [dict(scene) for scene in episode.storyboard_json]
+
+        invalid = [dict(scene) for scene in original]
+        invalid[0]["duration_seconds"] = 9
+        with pytest.raises(ValueError, match="current total is 17"):
+            service.update_storyboard_draft(episode, invalid)
+        assert episode.storyboard_json == original
+
+        music = settings.asset_dir / episode.id / "music-v1.mp3"
+        music.write_bytes(b"downstream music")
+        db.add(
+            Asset(
+                episode=episode,
+                kind=AssetKind.MUSIC,
+                provider="test",
+                path=str(music),
+                mime_type="audio/mpeg",
+                selected=True,
+            )
+        )
+        db.commit()
+
+        assert not service.storyboard_editable(episode)
+        with pytest.raises(RuntimeError, match="downstream production"):
+            service.update_storyboard_draft(episode, original)
+
+
 def test_lyrics_update_rejects_active_job_or_downstream_spend(
     tmp_path: Path,
 ):

@@ -963,6 +963,7 @@ def episode_detail(
                 episode,
                 "storyboard",
             ),
+            "storyboard_editable": service.storyboard_editable(episode),
             "has_music": service.has_valid_asset(episode, AssetKind.MUSIC),
             "selected_music": selected_music,
             "can_regenerate_music": service.can_regenerate_music(episode),
@@ -1199,20 +1200,105 @@ def approve_lyrics(
 @app.post("/episodes/{episode_id}/storyboard/approve")
 def approve_storyboard(
     episode_id: str,
+    scene_index: list[int] | None = Form(None),
+    scene_duration_seconds: list[int] | None = Form(None),
+    scene_word: list[str] | None = Form(None),
+    scene_lyric_cue: list[str] | None = Form(None),
+    scene_action: list[str] | None = Form(None),
+    scene_shot: list[str] | None = Form(None),
     db: Session = Depends(get_db),
 ):
     episode = get_episode_or_404(db, episode_id)
     try:
-        PipelineService(db, settings).approve_content(
-            episode,
-            "storyboard",
+        service = PipelineService(db, settings)
+        submitted_fields = (
+            scene_index,
+            scene_duration_seconds,
+            scene_word,
+            scene_lyric_cue,
+            scene_action,
+            scene_shot,
         )
+        if any(field is not None for field in submitted_fields):
+            service.update_storyboard_draft(
+                episode,
+                storyboard_scenes_from_form(*submitted_fields),
+            )
+        service.approve_content(episode, "storyboard")
     except (ActiveJobError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return RedirectResponse(
         f"/episodes/{episode.id}",
+        status_code=303,
+    )
+
+
+def storyboard_scenes_from_form(
+    scene_index: list[int] | None,
+    scene_duration_seconds: list[int] | None,
+    scene_word: list[str] | None,
+    scene_lyric_cue: list[str] | None,
+    scene_action: list[str] | None,
+    scene_shot: list[str] | None,
+) -> list[dict]:
+    fields = (
+        scene_index,
+        scene_duration_seconds,
+        scene_word,
+        scene_lyric_cue,
+        scene_action,
+        scene_shot,
+    )
+    if any(field is None for field in fields):
+        raise ValueError("All storyboard fields are required")
+    lengths = {len(field) for field in fields if field is not None}
+    if len(lengths) != 1 or not lengths or next(iter(lengths)) == 0:
+        raise ValueError("Storyboard fields have inconsistent scene counts")
+    return [
+        {
+            "index": scene_index[index],
+            "duration_seconds": scene_duration_seconds[index],
+            "word": scene_word[index],
+            "lyric_cue": scene_lyric_cue[index],
+            "action": scene_action[index],
+            "shot": scene_shot[index],
+        }
+        for index in range(len(scene_index))
+    ]
+
+
+@app.post("/episodes/{episode_id}/storyboard")
+def update_storyboard(
+    episode_id: str,
+    scene_index: list[int] = Form(...),
+    scene_duration_seconds: list[int] = Form(...),
+    scene_word: list[str] = Form(...),
+    scene_lyric_cue: list[str] = Form(...),
+    scene_action: list[str] = Form(...),
+    scene_shot: list[str] = Form(...),
+    db: Session = Depends(get_db),
+):
+    episode = get_episode_or_404(db, episode_id)
+    try:
+        PipelineService(db, settings).update_storyboard_draft(
+            episode,
+            storyboard_scenes_from_form(
+                scene_index,
+                scene_duration_seconds,
+                scene_word,
+                scene_lyric_cue,
+                scene_action,
+                scene_shot,
+            ),
+        )
+    except (ActiveJobError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return RedirectResponse(
+        f"/episodes/{episode.id}#storyboard-review",
         status_code=303,
     )
 

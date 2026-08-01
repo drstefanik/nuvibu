@@ -647,6 +647,57 @@
       {% if storyboard_approved %}<span class="status status-approved">approvato</span>{% endif %}
     </div>
     {% if episode.storyboard_json %}
+    {% if storyboard_editable %}
+    <form class="storyboard-edit-form" action="/episodes/{{ episode.id }}/storyboard" method="post">
+      <p class="muted storyboard-help">Modifica le singole scene. L’inizio viene ricalcolato automaticamente dalle durate; il totale deve restare di {{ episode.duration_seconds }} secondi.</p>
+      <ol class="storyboard storyboard-editor">
+        {% for scene in episode.storyboard_json %}
+        <li>
+          <div class="storyboard-scene-meta">
+            <strong>Scena {{ loop.index }}</strong>
+            <span>{{ scene.start_seconds }}–{{ scene.start_seconds + scene.duration_seconds }}s</span>
+            <input type="hidden" name="scene_index" value="{{ scene.index }}">
+            <label>
+              Durata
+              <span class="input-with-unit">
+                <input type="number" name="scene_duration_seconds" value="{{ scene.duration_seconds }}" min="4" max="12" required>
+                <small>sec</small>
+              </span>
+            </label>
+          </div>
+          <div class="storyboard-scene-fields">
+            <div class="storyboard-fields-row">
+              <label>
+                Parola o colore
+                <input type="text" name="scene_word" value="{{ scene.word }}" minlength="1" maxlength="100" required>
+              </label>
+              <label>
+                Verso associato
+                <input type="text" name="scene_lyric_cue" value="{{ scene.lyric_cue }}" minlength="1" maxlength="300" required>
+              </label>
+            </div>
+            <label>
+              Azione e regia
+              <textarea name="scene_action" rows="3" minlength="3" maxlength="800" required>{{ scene.action }}</textarea>
+            </label>
+            <label>
+              Inquadratura
+              <input type="text" name="scene_shot" value="{{ scene.shot }}" minlength="3" maxlength="300" required>
+            </label>
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      <div class="storyboard-total">
+        <span>Durata episodio</span>
+        <strong>{{ episode.duration_seconds }} secondi</strong>
+      </div>
+      <div class="review-actions">
+        <button class="button" type="submit">Salva modifiche</button>
+        <button class="button button-success" type="submit" formaction="/episodes/{{ episode.id }}/storyboard/approve">Salva e approva storyboard</button>
+      </div>
+    </form>
+    {% else %}
     <ol class="storyboard">
       {% for scene in episode.storyboard_json %}
       <li>
@@ -665,6 +716,10 @@
       <p>L’approvazione blocca la regia editoriale e abilita la prima fase a pagamento.</p>
       <button class="button button-success" type="submit">Approva storyboard</button>
     </form>
+    {% endif %}
+    {% if has_storyboard and not active_job %}
+    <p class="locked-note">Lo storyboard è bloccato perché la produzione musicale o video è già iniziata.</p>
+    {% endif %}
     {% endif %}
     {% else %}
     <p class="muted">Non ancora generato.</p>

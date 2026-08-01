@@ -42,6 +42,7 @@ from .prompts import (
     generate_storyboard,
     music_prompt,
     publish_metadata,
+    scene_prompt,
 )
 from .lyrics_engine import generate_song
 from .render import (
@@ -1705,6 +1706,178 @@ class PipelineService:
         )
         episode.status = EpisodeStatus.LYRICS_READY
         self._update_actual_cost(episode)
+        self.db.commit()
+        for old_path in replaced_paths:
+            if old_path != path:
+                old_path.unlink(missing_ok=True)
+        return asset
+
+    def storyboard_editable(self, episode: Episode) -> bool:
+        """Return whether editorial storyboard changes are still safe."""
+
+        if self.active_job(episode) is not None:
+            return False
+        assets = list(
+            self.db.scalars(
+                select(Asset).where(Asset.episode_id == episode.id)
+            )
+        )
+        return not self._storyboard_edit_blockers(episode, assets)
+
+    def _storyboard_edit_blockers(
+        self,
+        episode: Episode,
+        assets: list[Asset],
+    ) -> list[str]:
+        blocking_assets = [
+            asset
+            for asset in assets
+            if asset.cost_usd > 0
+            or asset.kind not in EDITABLE_DRAFT_ASSET_KINDS
+        ]
+        blockers = sorted({asset.kind.value for asset in blocking_assets})
+        blockers.extend(
+            path.name for path in self._draft_change_artifacts(episode)[:3]
+        )
+        return blockers
+
+    def _normalize_storyboard_draft(
+        self,
+        episode: Episode,
+        scenes: list[dict],
+    ) -> list[dict]:
+        if not 2 <= len(scenes) <= 100:
+            raise ValueError("Storyboard must contain between 2 and 100 scenes")
+
+        normalized: list[dict] = []
+        elapsed = 0
+        for index, raw_scene in enumerate(scenes):
+            try:
+                submitted_index = int(raw_scene.get("index", index))
+                duration = int(raw_scene["duration_seconds"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"Scene {index + 1} has an invalid index or duration"
+                ) from exc
+            if submitted_index != index:
+                raise ValueError("Scene order is invalid; reload the storyboard")
+            if not 4 <= duration <= 12:
+                raise ValueError(
+                    f"Scene {index + 1} duration must be between 4 and 12 seconds"
+                )
+
+            values = {
+                field: str(raw_scene.get(field, "")).strip()
+                for field in ("word", "lyric_cue", "action", "shot")
+            }
+            limits = {
+                "word": (1, 100),
+                "lyric_cue": (1, 300),
+                "action": (3, 800),
+                "shot": (3, 300),
+            }
+            for field, (minimum, maximum) in limits.items():
+                length = len(values[field])
+                if not minimum <= length <= maximum:
+                    raise ValueError(
+                        f"Scene {index + 1} field '{field}' must contain "
+                        f"between {minimum} and {maximum} characters"
+                    )
+            if values["lyric_cue"] not in (episode.lyrics_text or ""):
+                raise ValueError(
+                    f"Scene {index + 1} lyric cue must match the approved lyrics"
+                )
+
+            normalized.append(
+                {
+                    "index": index,
+                    "start_seconds": elapsed,
+                    "duration_seconds": duration,
+                    **values,
+                    "prompt": scene_prompt(
+                        episode,
+                        index,
+                        values["word"],
+                        values["action"],
+                        values["lyric_cue"],
+                        values["shot"],
+                    ),
+                }
+            )
+            elapsed += duration
+
+        if elapsed != episode.duration_seconds:
+            raise ValueError(
+                "Storyboard duration must equal the episode duration "
+                f"({episode.duration_seconds} seconds); current total is {elapsed}"
+            )
+        return normalized
+
+    def update_storyboard_draft(
+        self,
+        episode: Episode,
+        scenes: list[dict],
+    ) -> Asset:
+        """Persist an edited storyboard before downstream production starts."""
+
+        normalized = self._normalize_storyboard_draft(episode, scenes)
+        self._lock_episode(episode)
+        active = self.active_job(episode)
+        if active is not None:
+            self.db.rollback()
+            raise ActiveJobError(
+                f"Cannot edit storyboard while job {active.id} "
+                f"is {active.status.value}"
+            )
+
+        assets = list(
+            self.db.scalars(
+                select(Asset).where(Asset.episode_id == episode.id)
+            )
+        )
+        blockers = self._storyboard_edit_blockers(episode, assets)
+        if blockers:
+            self.db.rollback()
+            raise ReferenceChangeConflictError(
+                "Cannot edit storyboard after paid or downstream production exists: "
+                + ", ".join(blockers)
+            )
+
+        replaced_assets = [
+            asset for asset in assets if asset.kind == AssetKind.STORYBOARD
+        ]
+        replaced_paths = {Path(asset.path) for asset in replaced_assets}
+        for asset in replaced_assets:
+            self.db.delete(asset)
+
+        episode.storyboard_json = normalized
+        episode.qc_json = {}
+        self._clear_content_approvals(episode, "storyboard")
+        concept = dict(episode.concept_json or {})
+        generation = dict(concept.get("editorial_generation") or {})
+        if generation:
+            generation["storyboard_manually_edited"] = True
+            concept["editorial_generation"] = generation
+            episode.concept_json = concept
+
+        path = (
+            self._asset_episode_dir(episode)
+            / f"storyboard-draft-{uuid.uuid4().hex}.json"
+        )
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as draft:
+            json.dump(normalized, draft, ensure_ascii=False, indent=2)
+            draft.flush()
+            self._copy_completed_file(Path(draft.name), path)
+        asset = self._asset(
+            episode,
+            kind=AssetKind.STORYBOARD,
+            path=path,
+            mime_type="application/json",
+            provider="user-edited-storyboard",
+            selected=True,
+            metadata={"manually_edited": True},
+        )
+        episode.status = EpisodeStatus.STORYBOARD_READY
         self.db.commit()
         for old_path in replaced_paths:
             if old_path != path:
