@@ -25,6 +25,7 @@ from app.models import Asset, AssetKind, EpisodeStatus, Job, JobStatus
 from app.providers.base import VideoResult
 from app.providers.elevenlabs import (
     ElevenLabsMusicProvider,
+    _music_vocal_quality,
     build_music_v2_composition_plan,
     music_receipt_path,
     music_request_fingerprint,
@@ -675,6 +676,11 @@ def test_completed_music_before_ledger_resumes_the_same_reserved_job(
                         "state": "complete",
                         "request_fingerprint": fingerprint,
                         "estimated_cost_usd": 0.06,
+                        "vocal_qc": {
+                            "passed": True,
+                            "reason": "sung_lyrics_detected",
+                            "coverage_ratio": 1.0,
+                        },
                     }
                 ),
                 encoding="utf-8",
@@ -859,13 +865,32 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
 ):
     calls: list[dict] = []
 
+    boundary = "nuvibu-music-boundary"
+    timestamp_metadata = {
+        "words_timestamps": [
+            {"word": word, "start": index * 0.2, "end": index * 0.2 + 0.1}
+            for index, word in enumerate(
+                "Pio pio eccoci qua Splash splash salta anche tu Arcobaleno con Nuvibù".split()
+            )
+        ],
+        "song_metadata": {"title": "Test song", "languages": ["it"]},
+    }
+    multipart = (
+        f"--{boundary}\r\nContent-Type: application/json\r\n\r\n".encode()
+        + json.dumps(timestamp_metadata).encode()
+        + f"\r\n--{boundary}\r\nContent-Type: audio/mpeg\r\n".encode()
+        + b'Content-Disposition: attachment; filename="song.mp3"\r\n\r\n'
+        + b"x" * 2048
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
+
     class Response:
         status_code = 200
         headers = {
-            "content-type": "audio/mpeg",
+            "content-type": f"multipart/mixed; boundary={boundary}",
             "song-id": "song-structured",
         }
-        content = b"x" * 2048
+        content = multipart
 
         def raise_for_status(self):
             return None
@@ -914,6 +939,9 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
     assert "music_length_ms" not in payload
     assert payload["model_id"] == "music_v2"
     assert payload["sign_with_c2pa"] is True
+    assert payload["with_timestamps"] is True
+    assert calls[0]["url"].endswith("/v1/music/detailed")
+    assert calls[0]["headers"]["Accept"] == "multipart/mixed"
     plan = payload["composition_plan"]
     assert set(plan) == {"chunks"}
     assert sum(chunk["duration_ms"] for chunk in plan["chunks"]) == 75_000
@@ -939,9 +967,12 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
     )
     assert all(chunk["context_adherence"] == "high" for chunk in plan["chunks"])
     first_styles = set(plan["chunks"][0]["positive_styles"])
-    assert f"Authoritative musical and vocal direction: {direction}" in first_styles
+    assert direction not in first_styles
+    assert "electro-pop" in first_styles
+    assert "bright adult female lead vocalist" in first_styles
     assert all(direction not in chunk["text"] for chunk in plan["chunks"])
     assert "full instrumental backing under every sung line" in first_styles
+    assert "the designated lead singer performs every supplied lyric line" in first_styles
     assert "bright ukulele chord strumming throughout" not in first_styles
     assert "simple melody for very young children" not in first_styles
     assert (
@@ -949,12 +980,47 @@ def test_music_v2_uses_exact_composition_plan_and_approved_lines(
         in first_styles
     )
     assert "a cappella" in plan["chunks"][0]["negative_styles"]
+    assert "instrumental-only track" in plan["chunks"][0]["negative_styles"]
+    assert "no vocals" in plan["chunks"][0]["negative_styles"]
     chorus_styles = set(plan["chunks"][1]["positive_styles"])
     assert "full-arrangement chorus lift" in chorus_styles
     assert "light child backing vocals behind the lead" not in chorus_styles
     assert result.path == output
     assert result.metadata["song_id"] == "song-structured"
     assert result.metadata["music_direction"] == direction
+    assert result.metadata["vocal_qc"]["passed"] is True
+    assert result.metadata["vocal_qc"]["coverage_ratio"] >= 0.30
+
+
+def test_music_v2_speaker_labels_become_inline_cues_without_touching_literal_colons():
+    plan = build_music_v2_composition_plan(
+        lyrics='[Intro]\nNiko: “I-ò!”\nPorta azzurra: click!',
+        duration_seconds=12,
+        bpm=120,
+    )
+    lines = plan["chunks"][0]["text"].splitlines()[1:]
+    assert lines == ["{brief character response} I-ò!", "Porta azzurra: click!"]
+
+
+def test_vocal_qc_rejects_zero_words_and_accepts_matching_lyrics():
+    lyrics = "[Intro]\nSole su, mare blu!\nEmma, Niko, via!"
+    failed, failed_timestamps = _music_vocal_quality(lyrics, {})
+    assert failed["passed"] is False
+    assert failed["reason"] == "no_sung_words_detected"
+    assert failed_timestamps == []
+
+    passed, timestamps = _music_vocal_quality(
+        lyrics,
+        {
+            "words_timestamps": [
+                {"word": word, "start": index * 0.1, "end": index * 0.1 + 0.05}
+                for index, word in enumerate("Sole su mare blu Emma Niko via".split())
+            ]
+        },
+    )
+    assert passed["passed"] is True
+    assert passed["coverage_ratio"] >= 0.90
+    assert len(timestamps) == 7
 
 
 def test_music_v2_legacy_fallback_keeps_default_arrangement():
@@ -1119,4 +1185,62 @@ def test_paid_voice_only_music_is_preserved_deselected_and_retryable(
             asset.metadata_json["invalidation_reason"]
             == "insufficient_instrumental_arrangement"
         )
+        assert asset.metadata_json["invalidated_at"]
+
+
+def test_paid_instrumental_music_failed_vocal_qc_is_preserved_and_deselected(
+    tmp_path: Path,
+    monkeypatch,
+):
+    Session = make_session(tmp_path)
+    settings = Settings(
+        app_env="test",
+        database_url=f"sqlite:///{tmp_path / 'vocal-qc.db'}",
+        storage_root=tmp_path / "storage-vocal-qc",
+        provider_mode="live",
+    )
+    settings.ensure_directories()
+    monkeypatch.setattr(
+        "app.services.pipeline.music_arrangement_quality",
+        lambda _path: {
+            "passed": True,
+            "reason": "instrumental_arrangement_detected",
+            "low_band_energy_ratio": 0.1,
+        },
+    )
+    with Session() as db:
+        episode = make_episode(75)
+        db.add(episode)
+        db.commit()
+        music_path = settings.asset_dir / episode.id / "music-v1.mp3"
+        music_path.parent.mkdir(parents=True, exist_ok=True)
+        music_path.write_bytes(b"x" * 2048)
+        asset = Asset(
+            episode=episode,
+            kind=AssetKind.MUSIC,
+            provider="elevenlabs-music",
+            path=str(music_path),
+            mime_type="audio/mpeg",
+            variant=1,
+            selected=True,
+            duration_seconds=75,
+            cost_usd=0.19,
+            metadata_json={
+                "vocal_qc": {
+                    "passed": False,
+                    "reason": "no_sung_words_detected",
+                    "coverage_ratio": 0.0,
+                }
+            },
+        )
+        db.add(asset)
+        db.commit()
+
+        PipelineService(db, settings)._invalidate_unacceptable_music_assets(episode)
+
+        db.refresh(asset)
+        assert asset.selected is False
+        assert asset.cost_usd == pytest.approx(0.19)
+        assert asset.metadata_json["arrangement_qc"]["passed"] is True
+        assert asset.metadata_json["invalidation_reason"] == "missing_sung_lyrics"
         assert asset.metadata_json["invalidated_at"]

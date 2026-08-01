@@ -634,8 +634,7 @@ class PipelineService:
             self.db.commit()
 
     def _invalidate_unacceptable_music_assets(self, episode: Episode) -> None:
-        """Preserve paid history while making failed arrangements retryable."""
-
+        """Preserve paid history while making failed music retryable."""
         if self.settings.provider_mode != "live":
             return
         changed = False
@@ -644,16 +643,20 @@ class PipelineService:
             metadata = dict(asset.metadata_json or {})
             if metadata.get("invalidated_at"):
                 continue
+            invalidation_reason: str | None = None
+            vocal_qc = metadata.get("vocal_qc")
+            if isinstance(vocal_qc, dict) and vocal_qc.get("passed") is False:
+                invalidation_reason = "missing_sung_lyrics"
             quality = metadata.get("arrangement_qc")
             if not isinstance(quality, dict) or "passed" not in quality:
                 quality = music_arrangement_quality(Path(asset.path))
                 metadata["arrangement_qc"] = quality
                 changed = True
-            if not quality.get("passed"):
+            if not quality.get("passed") and invalidation_reason is None:
+                invalidation_reason = "insufficient_instrumental_arrangement"
+            if invalidation_reason is not None:
                 metadata["invalidated_at"] = invalidated_at
-                metadata["invalidation_reason"] = (
-                    "insufficient_instrumental_arrangement"
-                )
+                metadata["invalidation_reason"] = invalidation_reason
                 asset.selected = False
                 changed = True
             asset.metadata_json = metadata
@@ -2036,8 +2039,29 @@ class PipelineService:
                     output_path=path,
                     variant=variant,
                 )
+            vocal_failure: dict | None = None
             quality_failure: dict | None = None
             if self.settings.provider_mode == "live":
+                vocal_qc = result.metadata.get("vocal_qc")
+                if self.settings.elevenlabs_music_model == "music_v2":
+                    if not isinstance(vocal_qc, dict) or vocal_qc.get("passed") is not True:
+                        vocal_failure = (
+                            vocal_qc
+                            if isinstance(vocal_qc, dict)
+                            else {
+                                "passed": False,
+                                "reason": "missing_vocal_qc_metadata",
+                            }
+                        )
+                        result.metadata.update(
+                            {
+                                "vocal_qc": vocal_failure,
+                                "invalidated_at": datetime.now(
+                                    timezone.utc
+                                ).isoformat(),
+                                "invalidation_reason": "missing_sung_lyrics",
+                            }
+                        )
                 quality = music_arrangement_quality(result.path)
                 result.metadata = {
                     **result.metadata,
@@ -2045,26 +2069,38 @@ class PipelineService:
                 }
                 if not quality.get("passed"):
                     quality_failure = quality
-                    result.metadata.update(
-                        {
-                            "invalidated_at": datetime.now(
-                                timezone.utc
-                            ).isoformat(),
-                            "invalidation_reason": (
-                                "insufficient_instrumental_arrangement"
-                            ),
-                        }
-                    )
+                    if vocal_failure is None:
+                        result.metadata.update(
+                            {
+                                "invalidated_at": datetime.now(
+                                    timezone.utc
+                                ).isoformat(),
+                                "invalidation_reason": (
+                                    "insufficient_instrumental_arrangement"
+                                ),
+                            }
+                        )
             # Lock before the paid Asset flush. This keeps the rolling spend
             # read and reservation consumption on one side of the same short
             # serialization boundary.
             with self._daily_budget_lock():
                 self._asset(
                     episode, kind=AssetKind.MUSIC, path=result.path, mime_type="audio/mpeg", provider=result.provider,
-                    variant=result.variant, selected=result.variant == 1 and quality_failure is None, duration_seconds=result.duration_seconds,
+                    variant=result.variant, selected=result.variant == 1 and vocal_failure is None and quality_failure is None, duration_seconds=result.duration_seconds,
                     cost_usd=result.cost_usd, metadata=result.metadata,
                 )
                 self.db.commit()
+            if vocal_failure is not None:
+                self._update_actual_cost(episode)
+                self.db.commit()
+                reason = vocal_failure.get("reason", "missing_sung_lyrics")
+                coverage = float(vocal_failure.get("coverage_ratio", 0.0) or 0.0)
+                raise RuntimeError(
+                    "ElevenLabs produced a paid audio file, but Nuvibù rejected "
+                    "it because no usable sung rendition of the approved lyrics "
+                    f"was detected ({reason}; coverage {coverage:.1%}). The spend "
+                    "was preserved in the ledger; an explicit music retry is safe."
+                )
             if quality_failure is not None:
                 self._update_actual_cost(episode)
                 self.db.commit()
