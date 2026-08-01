@@ -28,6 +28,14 @@ _EXPECTED_LOOKS = (
     ("emma-starry-bedtime-v1", "Nanna stellata"),
     ("emma-coral-party-v1", "Festa corallo"),
     ("emma-cream-winter-v1", "Inverno crema"),
+    ("emma-aegean-swimsuit-v1", "Costumino Egeo"),
+    ("emma-cyclades-dress-v1", "Abitino Cicladi"),
+    ("emma-santorini-lemon-v1", "Limone di Santorini"),
+    ("emma-bougainvillea-summer-v1", "Bouganville"),
+    ("emma-peach-shell-v1", "Conchiglia pesca"),
+    ("emma-summer-sage-v1", "Salvia d'estate"),
+    ("emma-lavender-sunset-v1", "Lavanda al tramonto"),
+    ("emma-sea-breeze-v1", "Brezza marina"),
 )
 _EXPECTED_LEGACY_DEFAULT = "emma-classic-nuvibu-v1"
 _EXPECTED_NEW_EPISODE_DEFAULT = "emma-pink-dress-v1"

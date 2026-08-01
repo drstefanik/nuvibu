@@ -1,5 +1,5 @@
 {
-  "catalog_version": 1,
+  "catalog_version": 2,
   "legacy_default": "emma-classic-nuvibu-v1",
   "new_episode_default": "emma-pink-dress-v1",
   "looks": [
@@ -92,6 +92,78 @@
       "reference_sha256": "57263c82d8e416347ebfcbfeba6445345abf9e3dfeb5800ba7c9e57589634042",
       "outfit_prompt": "Emma wears the locked cream-winter outfit: a warm cream fine-knit cardigan over a blush-pink long-sleeved baby romper, warm cream tights, and soft pink shoes.",
       "alt_text": "Emma con cardigan crema, pagliaccetto rosa cipria, calzamaglia e scarpine rosa"
+    },
+    {
+      "id": "emma-aegean-swimsuit-v1",
+      "display_name": "Costumino Egeo",
+      "reference_path": "brand/source/emma-looks/emma-aegean-swimsuit-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-aegean-swimsuit-v1.webp",
+      "reference_sha256": "343f97d2ba5cec2f0bf1cd371b4a026268ff081fceb91d9bc4085ec923fba20f",
+      "outfit_prompt": "Emma wears the locked Aegean beach outfit: a modest turquoise-blue toddler one-piece swimsuit with a simple white ruffle around the neckline and shoulder straps, one tiny white wave motif centered on the chest, and bare feet; no hat or accessories.",
+      "alt_text": "Emma con costumino intero turchese Egeo, volant bianco e piedini scalzi"
+    },
+    {
+      "id": "emma-cyclades-dress-v1",
+      "display_name": "Abitino Cicladi",
+      "reference_path": "brand/source/emma-looks/emma-cyclades-dress-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-cyclades-dress-v1.webp",
+      "reference_sha256": "592ffe976e9f0c33ba8155d3335e866e05da08c16287e83c2f9edc609fa312cd",
+      "outfit_prompt": "Emma wears the locked Cyclades outfit: an airy white sleeveless toddler dress in soft linen with Greek-blue piping around the round neckline and hem, two tiny Greek-blue embroidered diamond accents near the lower hem, white ruffled bloomers visible underneath, and soft Greek-blue toddler sandals.",
+      "alt_text": "Emma con abitino bianco stile Cicladi, ricami e sandali azzurro Grecia"
+    },
+    {
+      "id": "emma-santorini-lemon-v1",
+      "display_name": "Limone di Santorini",
+      "reference_path": "brand/source/emma-looks/emma-santorini-lemon-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-santorini-lemon-v1.webp",
+      "reference_sha256": "e89115d82e0f66a4d63a4b37af2ae3be637ad4d1fdf34c61bcc627a7ddb73902",
+      "outfit_prompt": "Emma wears the locked Santorini-lemon outfit: a pale lemon-yellow sleeveless toddler romper in soft cotton with a rounded white collar, subtle white shoulder ruffles, small Greek-blue fabric buttons on the chest, short bloomer legs, and soft white toddler sandals.",
+      "alt_text": "Emma con pagliaccetto giallo limone, volant bianchi, bottoncini blu e sandali bianchi"
+    },
+    {
+      "id": "emma-bougainvillea-summer-v1",
+      "display_name": "Bouganville",
+      "reference_path": "brand/source/emma-looks/emma-bougainvillea-summer-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-bougainvillea-summer-v1.webp",
+      "reference_sha256": "795f25bfc9e623fc8280ab56596b6e66d0b01d469a7a543ec79546a8c04b0966",
+      "outfit_prompt": "Emma wears the locked bougainvillea outfit: a vivid warm-pink sleeveless baby dress with a simple ivory rounded collar, soft ruffled shoulders, a lightly gathered skirt, ivory ruffled bloomers visible underneath, and soft ivory toddler shoes; no floral print.",
+      "alt_text": "Emma con vestitino rosa bouganville, colletto avorio, volant e scarpine chiare"
+    },
+    {
+      "id": "emma-peach-shell-v1",
+      "display_name": "Conchiglia pesca",
+      "reference_path": "brand/source/emma-looks/emma-peach-shell-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-peach-shell-v1.webp",
+      "reference_sha256": "930ee0a4402d73b64ecbb2216828dfa5f85455b2f3ce7b4e9b4f1a26422cd2fc",
+      "outfit_prompt": "Emma wears the locked peach-shell outfit: a plain warm-ivory sleeveless cotton blouse with small soft shoulder ruffles, high-waisted soft-peach toddler shorts with gathered bloomer legs, and soft blush-pink closed-toe toddler shoes.",
+      "alt_text": "Emma con blusa avorio a volant, shorts a palloncino pesca e scarpine rosa"
+    },
+    {
+      "id": "emma-summer-sage-v1",
+      "display_name": "Salvia d'estate",
+      "reference_path": "brand/source/emma-looks/emma-summer-sage-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-summer-sage-v1.webp",
+      "reference_sha256": "fe0e2c347758e0f211c26778024eff58c217858b9ee9684ff6527c660af558d7",
+      "outfit_prompt": "Emma wears the locked summer-sage outfit: a light sage-green sleeveless toddler romper in soft linen-cotton with a simple ivory rounded collar, subtle ivory piping, two tiny natural-wood-colored buttons, short gathered bloomer legs, and soft ivory toddler sandals.",
+      "alt_text": "Emma con pagliaccetto verde salvia, colletto avorio, bottoncini e sandali chiari"
+    },
+    {
+      "id": "emma-lavender-sunset-v1",
+      "display_name": "Lavanda al tramonto",
+      "reference_path": "brand/source/emma-looks/emma-lavender-sunset-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-lavender-sunset-v1.webp",
+      "reference_sha256": "53c6628f84b8398580fc93ca769f2ea680be15ce0a460edbc8893f43cf94ccff",
+      "outfit_prompt": "Emma wears the locked lavender-sunset outfit: a pale lavender sleeveless seersucker baby dress with a soft square neckline, tiny ivory ruffles at the straps, a gently gathered short skirt, ivory ruffled bloomers visible underneath, and soft lavender toddler shoes.",
+      "alt_text": "Emma con vestitino estivo lavanda, spalline a volant, coulotte e scarpine lilla"
+    },
+    {
+      "id": "emma-sea-breeze-v1",
+      "display_name": "Brezza marina",
+      "reference_path": "brand/source/emma-looks/emma-sea-breeze-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-sea-breeze-v1.webp",
+      "reference_sha256": "b09fb61a75d4afde939b432529c346bc9d2767d0bbc30ed32dfbad0499cabca7",
+      "outfit_prompt": "Emma wears the locked sea-breeze outfit: a plain soft-white short-sleeved toddler blouse with a rounded neckline and delicate sleeve ruffles, powder-blue gingham bloomer shorts with very small checks, and soft powder-blue toddler sandals; no sailor collar or emblem.",
+      "alt_text": "Emma con blusa bianca a volant, coulotte a quadretti azzurri e sandaletti celesti"
     }
   ]
 }

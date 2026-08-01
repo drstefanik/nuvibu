@@ -1,6 +1,6 @@
-# Nuvibù Studio 0.4.0
+# Nuvibù Studio 0.4.1
 
-Data: 30 luglio 2026
+Data: 1 agosto 2026
 
 ## Aggiornamenti
 
@@ -18,7 +18,7 @@ Data: 30 luglio 2026
 - mantenuta la nuvola Nuvi come spalla visivamente secondaria;
 - rigenerati key art, avatar e banner YouTube nella nuova gerarchia;
 - aggiornata la Character Bible: volto, occhi, capelli, ciuffo e proporzioni di Emma sono immutabili;
-- introdotto il catalogo chiuso di dieci look ufficiali precaricati, senza upload arbitrari della reference di Emma;
+- esteso il catalogo chiuso da dieci a diciotto look ufficiali precaricati, con Costumino Egeo, Abitino Cicladi e sei ulteriori outfit estivi;
 - aggiunta la selezione tramite anteprime cliccabili: un solo look viene salvato e bloccato per l’intero episodio;
 - impostato **Rosa confetto** come default dei nuovi episodi e **Classico Nuvibù** come fallback degli episodi precedenti privi di selezione;
 - la copia specifica del look salvata con l’episodio viene inviata a Veo come immagine 1;
