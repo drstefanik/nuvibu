@@ -210,6 +210,43 @@ VISUAL_VERB_SUFFIXES = {
     "uto",
 }
 
+# English episodes use English scene directions, so their visual actions must
+# contribute to the same editorial variety gate as Italian directions.
+KNOWN_ENGLISH_VISUAL_VERB_FORMS: tuple[tuple[str, frozenset[str]], ...] = (
+    ("appear", frozenset({"appear", "appears", "appeared", "appearing"})),
+    ("bounce", frozenset({"bounce", "bounces", "bounced", "bouncing"})),
+    ("burst", frozenset({"burst", "bursts", "bursting"})),
+    ("circle", frozenset({"circle", "circles", "circled", "circling"})),
+    ("clap", frozenset({"clap", "claps", "clapped", "clapping"})),
+    ("copy", frozenset({"copy", "copies", "copied", "copying"})),
+    ("count", frozenset({"count", "counts", "counted", "counting"})),
+    ("dance", frozenset({"dance", "dances", "danced", "dancing"})),
+    ("fly", frozenset({"fly", "flies", "flew", "flying"})),
+    ("follow", frozenset({"follow", "follows", "followed", "following"})),
+    ("freeze", frozenset({"freeze", "freezes", "froze", "frozen", "freezing"})),
+    ("glow", frozenset({"glow", "glows", "glowed", "glowing"})),
+    ("hit", frozenset({"hit", "hits", "hitting"})),
+    ("invite", frozenset({"invite", "invites", "invited", "inviting"})),
+    ("jump", frozenset({"jump", "jumps", "jumped", "jumping"})),
+    ("lift", frozenset({"lift", "lifts", "lifted", "lifting"})),
+    ("move", frozenset({"move", "moves", "moved", "moving"})),
+    ("point", frozenset({"point", "points", "pointed", "pointing"})),
+    ("raise", frozenset({"raise", "raises", "raised", "raising"})),
+    ("roll", frozenset({"roll", "rolls", "rolled", "rolling"})),
+    ("run", frozenset({"run", "runs", "ran", "running"})),
+    ("serve", frozenset({"serve", "serves", "served", "serving"})),
+    ("shine", frozenset({"shine", "shines", "shone", "shining"})),
+    ("skim", frozenset({"skim", "skims", "skimmed", "skimming"})),
+    ("slide", frozenset({"slide", "slides", "slid", "sliding"})),
+    ("smile", frozenset({"smile", "smiles", "smiled", "smiling"})),
+    ("spin", frozenset({"spin", "spins", "spun", "spinning"})),
+    ("swing", frozenset({"swing", "swings", "swung", "swinging"})),
+    ("toss", frozenset({"toss", "tosses", "tossed", "tossing"})),
+    ("touch", frozenset({"touch", "touches", "touched", "touching"})),
+    ("turn", frozenset({"turn", "turns", "turned", "turning"})),
+    ("wave", frozenset({"wave", "waves", "waved", "waving"})),
+)
+
 SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
 WORD_RE = re.compile(r"[a-zà-öø-ÿ0-9']+", re.IGNORECASE)
 
@@ -358,7 +395,7 @@ def _structure(lyrics: str) -> tuple[str, ...]:
 
 def _verbs(text: str) -> list[str]:
     words = set(WORD_RE.findall(_plain(text)))
-    return [
+    detected = [
         canonical
         for canonical, stem in KNOWN_VISUAL_VERB_STEMS
         if any(
@@ -367,6 +404,12 @@ def _verbs(text: str) -> list[str]:
             for word in words
         )
     ]
+    detected.extend(
+        canonical
+        for canonical, forms in KNOWN_ENGLISH_VISUAL_VERB_FORMS
+        if words.intersection(forms)
+    )
+    return detected
 
 
 def _last_word(line: str) -> str:

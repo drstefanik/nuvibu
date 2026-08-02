@@ -9,6 +9,7 @@ VEO_LOCATION="${GOOGLE_CLOUD_LOCATION:-us-central1}"
 REPOSITORY="${ARTIFACT_REPOSITORY:-nuvibu}"
 WEB_SERVICE="nuvibu-web"
 WORKER_JOB="nuvibu-worker"
+EDITORIAL_PATCH_JOB="nuvibu-editorial-patch-20260802"
 WEB_SA="nuvibu-web@${PROJECT_ID}.iam.gserviceaccount.com"
 WORKER_SA="nuvibu-worker@${PROJECT_ID}.iam.gserviceaccount.com"
 
@@ -274,6 +275,29 @@ gcloud run jobs add-iam-policy-binding "${WORKER_JOB}" \
   --region "${RUN_REGION}" \
   --member "serviceAccount:${WEB_SA}" \
   --role roles/run.jobsExecutorWithOverrides >/dev/null
+
+
+echo "Applying the approved Wimbledon lyrics and storyboard revision"
+gcloud run jobs deploy "${EDITORIAL_PATCH_JOB}" \
+  --project "${PROJECT_ID}" \
+  --image "${IMAGE}" \
+  --region "${RUN_REGION}" \
+  --service-account "${WEB_SA}" \
+  --command python \
+  --args scripts/patch_wimbledon_episode.py \
+  --tasks 1 \
+  --parallelism 1 \
+  --max-retries 0 \
+  --task-timeout 600s \
+  --cpu 1 \
+  --memory 512Mi \
+  --set-env-vars "${COMMON_ENV},RUNTIME_ROLE=maintenance" \
+  --set-secrets "DATABASE_URL=database-url:${DATABASE_SECRET_VERSION}" \
+  --add-volume "${VOLUME_SPEC}"
+gcloud run jobs execute "${EDITORIAL_PATCH_JOB}" \
+  --project "${PROJECT_ID}" \
+  --region "${RUN_REGION}" \
+  --wait
 
 EXISTING_SERVICE_URL="$(
   gcloud run services describe "${WEB_SERVICE}" \
