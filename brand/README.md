@@ -7,7 +7,7 @@ Questa cartella contiene la direzione visiva corrente del canale.
 - `nuvibu-avatar-800.png`: avatar canale 800×800;
 - `nuvibu-youtube-banner-2560x1440.png`: banner con elementi essenziali dentro la safe area centrale;
 - `source/nuvibu-key-art.png`: key art principale con Emma in primo piano e Nuvi come spalla;
-- `source/emma-looks/*.png`: diciotto reference master approvate e bloccate di Emma;
+- `source/emma-looks/*-v1.png`: diciannove reference master approvate e bloccate di Emma;
 - `source/emma-character-sheet.png`: alias di compatibilità per i flussi precedenti al catalogo;
 - `source/nuvi-cloud-key-art.png`: reference storica della nuvola, ora personaggio secondario;
 - `concepts/cucu-dietro-la-nuvola.png`: concept thumbnail episodio;
@@ -19,7 +19,7 @@ Questa cartella contiene la direzione visiva corrente del canale.
 ## Catalogo look bloccato
 
 L’abbigliamento non si modifica liberamente: per ogni episodio si sceglie
-**esattamente uno** dei diciotto look precaricati e quel look resta invariato in
+**esattamente uno** dei diciannove look precaricati e quel look resta invariato in
 tutte le scene, nei retry e negli asset derivati.
 
 | ID | Nome mostrato |
@@ -42,6 +42,7 @@ tutte le scene, nei retry e negli asset derivati.
 | `emma-summer-sage-v1` | Salvia d'estate |
 | `emma-lavender-sunset-v1` | Lavanda al tramonto |
 | `emma-sea-breeze-v1` | Brezza marina |
+| `emma-wimbledon-tennis-v1` | Wimbledon |
 
 I nuovi episodi partono da **Rosa confetto**. Gli episodi precedenti che non
 hanno ancora una scelta salvata usano **Classico Nuvibù**, così il loro aspetto

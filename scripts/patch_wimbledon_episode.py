@@ -9,6 +9,7 @@ from app.models import AssetKind, Episode
 from app.services.pipeline import PipelineService
 
 EPISODE_ID = "33070fd0-6106-42f8-a856-b8e8b773ce5e"
+EMMA_LOOK_ID = "emma-wimbledon-tennis-v1"
 
 LYRICS = """[Spoken Intro]
 
@@ -314,6 +315,14 @@ def main() -> None:
                 f"Refusing editorial patch while job {active.id} is {active.status.value}"
             )
 
+        look_changed = service.selected_emma_look_id(episode) != EMMA_LOOK_ID
+        if look_changed:
+            service.set_emma_look(episode, EMMA_LOOK_ID)
+            episode = db.get(Episode, EPISODE_ID)
+            if episode is None:
+                raise RuntimeError("Episode disappeared after Emma look update")
+            service = PipelineService(db, settings)
+
         lyrics_changed = (
             (episode.lyrics_text or "").strip() != LYRICS
             or not service.has_valid_asset(episode, AssetKind.LYRICS)
@@ -355,6 +364,11 @@ def main() -> None:
             json.dumps(
                 {
                     "episode_id": episode.id,
+                    "emma_look_id": service.selected_emma_look_id(episode),
+                    "emma_look_updated": look_changed,
+                    "reference_pack_complete": service.reference_pack_complete(
+                        episode
+                    ),
                     "lyrics_updated": lyrics_changed,
                     "storyboard_updated": storyboard_changed,
                     "lyrics_approved": service.content_is_approved(episode, "lyrics"),

@@ -150,9 +150,10 @@ def _format_bpm_range(song_format: str) -> tuple[int, int]:
 def _sung_meter_profile(lyrics: str) -> dict:
     """Measure meter section by section, excluding spoken/SFX material.
 
-    Very short calls such as "BUM!" or "Sistema acceso!" are intentional
-    rhythmic cues, not sung verses. Comparing them with full lyrical lines
-    created false blocking failures for energetic baby-dance songs.
+    Very short calls such as "BUM!", "Sistema acceso!" or the three-word
+    English movement cue "left then right" are intentional rhythmic fragments,
+    not complete sung verses. Comparing them with full lyrical lines created
+    false blocking failures for energetic baby-dance songs.
     """
 
     current_section = "testo"
@@ -178,11 +179,14 @@ def _sung_meter_profile(lyrics: str) -> dict:
             continue
 
         words = WORD_RE.findall(line)
-        if len(words) < 3:
+        syllable_count = count_syllables(line)
+        if len(words) < 3 or (
+            len(words) == 3 and syllable_count < 4
+        ):
             continue
 
         sections.setdefault(current_section, []).append(
-            count_syllables(line)
+            syllable_count
         )
 
     section_metrics: list[dict] = []

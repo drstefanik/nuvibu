@@ -1,5 +1,5 @@
 {
-  "catalog_version": 2,
+  "catalog_version": 3,
   "legacy_default": "emma-classic-nuvibu-v1",
   "new_episode_default": "emma-pink-dress-v1",
   "looks": [
@@ -164,6 +164,15 @@
       "reference_sha256": "b09fb61a75d4afde939b432529c346bc9d2767d0bbc30ed32dfbad0499cabca7",
       "outfit_prompt": "Emma wears the locked sea-breeze outfit: a plain soft-white short-sleeved toddler blouse with a rounded neckline and delicate sleeve ruffles, powder-blue gingham bloomer shorts with very small checks, and soft powder-blue toddler sandals; no sailor collar or emblem.",
       "alt_text": "Emma con blusa bianca a volant, coulotte a quadretti azzurri e sandaletti celesti"
+    },
+    {
+      "id": "emma-wimbledon-tennis-v1",
+      "display_name": "Wimbledon",
+      "reference_path": "brand/source/emma-looks/emma-wimbledon-tennis-v1.png",
+      "thumbnail_path": "app/static/emma-looks/emma-wimbledon-tennis-v1.webp",
+      "reference_sha256": "82944f7da56454a860882223de3e559a326f1ad7cabfc417aa098867ec99a999",
+      "outfit_prompt": "Emma wears the locked classic grass-court tennis outfit: a crisp white short-sleeved pleated baby tennis dress with a rounded Peter Pan collar and narrow green piping at the collar, sleeve cuffs and waist, white ruffled bloomers visible beneath the skirt, a white headband with one narrow green stripe, a small white hair tie securing the high sprout ponytail, white ankle socks with narrow green stripes, and plain white toddler tennis shoes. No logos, lettering, jewellery or extra accessories. A wooden tennis racket may appear only when required by the scene.",
+      "alt_text": "Emma con abitino da tennis bianco plissettato, bordini verdi, fascia e scarpine bianche"
     }
   ]
 }

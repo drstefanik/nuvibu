@@ -42,6 +42,7 @@ EXPECTED_LOOKS = (
     ("emma-summer-sage-v1", "Salvia d'estate"),
     ("emma-lavender-sunset-v1", "Lavanda al tramonto"),
     ("emma-sea-breeze-v1", "Brezza marina"),
+    ("emma-wimbledon-tennis-v1", "Wimbledon"),
 )
 
 
@@ -57,11 +58,11 @@ def _write_manifest(tmp_path: Path, transform) -> Path:
 
 
 def test_catalog_is_locked_ordered_and_immutable():
-    assert CATALOG_VERSION == 2
+    assert CATALOG_VERSION == 3
     assert isinstance(EMMA_LOOKS, tuple)
     assert EMMA_LOOK_CATALOG is EMMA_LOOKS
     assert tuple((look.id, look.display_name) for look in EMMA_LOOKS) == EXPECTED_LOOKS
-    assert len({look.id for look in EMMA_LOOKS}) == 18
+    assert len({look.id for look in EMMA_LOOKS}) == 19
 
     with pytest.raises(FrozenInstanceError):
         EMMA_LOOKS[0].display_name = "Alterato"
@@ -117,7 +118,7 @@ def test_loader_fails_closed_when_catalog_count_changes(tmp_path: Path):
         lambda manifest: manifest["looks"].pop(),
     )
 
-    with pytest.raises(EmmaLookCatalogError, match="exactly 18"):
+    with pytest.raises(EmmaLookCatalogError, match="exactly 19"):
         _load_catalog(manifest_path, PROJECT_ROOT)
 
 

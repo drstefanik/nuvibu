@@ -195,7 +195,7 @@ def test_storyboard_is_editable_and_saves_every_scene_field(
         assert "Rivedi e approva le scene" in persisted.text
 
 
-def test_episode_page_has_exactly_eighteen_clickable_emma_looks(
+def test_episode_page_has_exactly_nineteen_clickable_emma_looks(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -207,8 +207,8 @@ def test_episode_page_has_exactly_eighteen_clickable_emma_looks(
 
         assert detail.status_code == 200
         buttons = _emma_look_buttons(detail.text)
-        assert len(main_module.EMMA_LOOKS) == 18
-        assert len(buttons) == 18
+        assert len(main_module.EMMA_LOOKS) == 19
+        assert len(buttons) == 19
         assert all(" disabled" not in button for button in buttons)
         assert detail.text.count('class="emma-look-form"') == 1
         assert {look.id for look in main_module.EMMA_LOOKS} == {
@@ -360,7 +360,7 @@ def test_emma_look_controls_are_disabled_and_post_conflicts_when_locked(
 
         detail = client.get(episode_url)
         buttons = _emma_look_buttons(detail.text)
-        assert len(buttons) == 18
+        assert len(buttons) == 19
         assert all(" disabled" in button for button in buttons)
         assert all('aria-disabled="true"' in button for button in buttons)
         assert "Il look è bloccato" in detail.text

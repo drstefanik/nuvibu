@@ -22,7 +22,7 @@
     },
     "wardrobe_policy": {
       "selection_mode": "locked preloaded catalog only",
-      "catalog_size": 18,
+      "catalog_size": 19,
       "episode_rule": "exactly one approved look is selected per episode and remains fixed across every scene, render, retry and derivative asset of that episode",
       "new_episode_default": {
         "id": "emma-pink-dress-v1",
@@ -35,7 +35,7 @@
       },
       "editor_selection": "the editor chooses a look by clicking its preview thumbnail; the selected value and an episode-specific image copy are stored with the episode",
       "veo_mapping": "the episode-specific stored copy of the selected look is sent to Veo as image 1",
-      "arbitrary_uploads": "forbidden; editors cannot upload, replace or improvise an Emma reference outside the eighteen approved looks",
+      "arbitrary_uploads": "forbidden; editors cannot upload, replace or improvise an Emma reference outside the nineteen approved looks",
       "approved_looks": [
         {
           "id": "emma-classic-nuvibu-v1",
@@ -108,6 +108,10 @@
         {
           "id": "emma-sea-breeze-v1",
           "name": "Brezza marina"
+        },
+        {
+          "id": "emma-wimbledon-tennis-v1",
+          "name": "Wimbledon"
         }
       ]
     },
@@ -133,7 +137,7 @@
       "missing or extra limbs or fingers",
       "older-child or adult proportions",
       "different eye color, face shape, hair color or top-sprout silhouette",
-      "an Emma wardrobe outside the eighteen locked preloaded looks",
+      "an Emma wardrobe outside the nineteen locked preloaded looks",
       "changing, combining or recoloring the selected look within an episode",
       "arbitrary editor-uploaded Emma references",
       "pacifier in production scenes unless explicitly required by the episode",

@@ -36,6 +36,7 @@ _EXPECTED_LOOKS = (
     ("emma-summer-sage-v1", "Salvia d'estate"),
     ("emma-lavender-sunset-v1", "Lavanda al tramonto"),
     ("emma-sea-breeze-v1", "Brezza marina"),
+    ("emma-wimbledon-tennis-v1", "Wimbledon"),
 )
 _EXPECTED_LEGACY_DEFAULT = "emma-classic-nuvibu-v1"
 _EXPECTED_NEW_EPISODE_DEFAULT = "emma-pink-dress-v1"

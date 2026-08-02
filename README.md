@@ -4,7 +4,7 @@
 
 Console autonoma per progettare, produrre, revisionare e misurare **canzoni e cartoni originali per un canale YouTube made-for-kids**. Il progetto non è collegato a British Institutes o Digital Campus.
 
-L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends**. Emma, cartoonizzata dalle reference familiari approvate, è la protagonista fissa di ogni episodio; la nuvola Nuvi è la sua spalla ricorrente. La Character Bible rende immutabili volto, occhi, capelli, silhouette e gerarchia del cast. Il guardaroba è limitato a diciotto look ufficiali precaricati: ogni episodio ne usa esattamente uno, senza cambi d’abito tra le scene. Nome, handle e marchio devono comunque essere verificati prima del lancio pubblico.
+L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends**. Emma, cartoonizzata dalle reference familiari approvate, è la protagonista fissa di ogni episodio; la nuvola Nuvi è la sua spalla ricorrente. La Character Bible rende immutabili volto, occhi, capelli, silhouette e gerarchia del cast. Il guardaroba è limitato a diciannove look ufficiali precaricati: ogni episodio ne usa esattamente uno, senza cambi d’abito tra le scene. Nome, handle e marchio devono comunque essere verificati prima del lancio pubblico.
 
 ## Stato del progetto
 
@@ -19,7 +19,7 @@ L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends*
 - varianti musicali e adattatore ElevenLabs Music;
 - storyboard automatico in scene;
 - adattatore Google Veo dual backend (Gemini API o Vertex AI) con character reference;
-- catalogo bloccato di diciotto look di Emma, scelti tramite anteprima cliccabile e fissati per episodio;
+- catalogo bloccato di diciannove look di Emma, scelti tramite anteprima cliccabile e fissati per episodio;
 - copia della reference scelta salvata con l’episodio e inviata a Veo come immagine 1;
 - modalità mock offline e senza crediti;
 - montaggio FFmpeg 16:9;
@@ -52,7 +52,7 @@ L’identità pubblica è **Nuvibù** e la serie principale è **Emma & Friends*
 | Avatar canale | `brand/nuvibu-avatar-800.png` |
 | Banner YouTube | `brand/nuvibu-youtube-banner-2560x1440.png` |
 | Key art Emma & Friends | `brand/source/nuvibu-key-art.png` |
-| Diciotto reference look Emma | `brand/source/emma-looks/*.png` |
+| Diciannove reference look Emma | `brand/source/emma-looks/*-v1.png` |
 | Alias Emma per compatibilità | `brand/source/emma-character-sheet.png` |
 | Reference Nuvi, la nuvola | `brand/source/nuvi-cloud-key-art.png` |
 | Concept “Pulcini Arcobaleno” | `brand/concepts/pulcini-arcobaleno.png` |
@@ -66,7 +66,7 @@ La modalità mock usa queste immagini approvate per creare preview animate con p
 ### Selezione del look di Emma
 
 Nel Reference pack l’editor sceglie il look dalla griglia
-**“Scegli il look di Emma”**, cliccando una delle diciotto anteprime ufficiali.
+**“Scegli il look di Emma”**, cliccando una delle diciannove anteprime ufficiali.
 Non è possibile caricare una reference Emma arbitraria. La scelta viene
 registrata sull’episodio e resta la stessa per tutte le scene, i retry, il
 video, lo Short e la thumbnail.
@@ -87,7 +87,7 @@ Brief
   → storyboard
   → revisione e approvazione storyboard
   → conferma costo e musica
-  → scelta di uno dei 18 look Emma + amici + mondo
+  → scelta di uno dei 19 look Emma + amici + mondo
   → conferma costo e scene AI
   → copia del look salvata per l’episodio
   → scene AI con quella copia di Emma obbligatoria come image 1
