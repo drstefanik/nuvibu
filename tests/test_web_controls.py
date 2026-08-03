@@ -480,7 +480,9 @@ def test_bundled_reference_preset_is_recommended_and_applied_server_side(
         detail = client.get(episode_url)
 
         assert detail.status_code == 200
-        assert detail.text.count('class="reference-preset-card') == 2
+        assert detail.text.count('class="reference-preset-card') == len(
+            main_module.REFERENCE_PRESETS
+        )
         assert "Reference pack precaricati" in detail.text
         assert "Nanna arcobaleno" in detail.text
         assert "reference-preset-recommended" in detail.text

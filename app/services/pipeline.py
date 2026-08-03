@@ -2825,7 +2825,11 @@ class PipelineService:
                             ),
                             duration_seconds=int(scene["duration_seconds"]),
                             output_path=path,
-                            seed=173 + index,
+                            # A fixed episode seed reinforces the same identity,
+                            # materials and rendering language across independently
+                            # generated scene clips; the scene prompt still controls
+                            # the distinct physical action.
+                            seed=173,
                             reference_images=references,
                         )
                         result.metadata["attempt"] = attempt + 1

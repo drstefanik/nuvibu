@@ -119,6 +119,31 @@ _PRESET_DEFINITIONS = (
             "palloncini",
         ),
     },
+    {
+        "id": "wimbledon-tennis-v1",
+        "display_name": "Wimbledon — Emma e Ace",
+        "description": (
+            "Ace come unica pallina da tennis e campo in erba vuoto, senza "
+            "nuvole-personaggio, dinosauri, bambini o altre comparse."
+        ),
+        "directory": "wimbledon-tennis",
+        "friends_filename": "02-ace-tennis-ball.png",
+        "world_filename": "03-mondo-wimbledon-vuoto.png",
+        "friends_sha256": (
+            "78374f4d94cbd5b57f595786e75dc2678eee8f4a0549bd95ea4992f8115e04f5"
+        ),
+        "world_sha256": (
+            "d6123a45a0a2c8efb829dae3ff0a218fa771ba0439ff44df3dc19d0b14a6c781"
+        ),
+        "keywords": (
+            "wimbledon",
+            "tennis",
+            "ace",
+            "pallina",
+            "racchetta",
+            "campo in erba",
+        ),
+    },
 )
 
 

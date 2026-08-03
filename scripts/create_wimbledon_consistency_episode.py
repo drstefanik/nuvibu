@@ -14,118 +14,124 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.models import AssetKind, Episode
+from app.reference_presets import get_reference_preset
 from app.services.pipeline import PipelineService
 
 
-SOURCE_EPISODE_ID = "33070fd0-6106-42f8-a856-b8e8b773ce5e"
-WORKING_SLUG = "tap-tap-tennis-con-emma-wimbledon"
+WORKING_SLUG = "emma-gioca-a-tennis-wimbledon-tap-tap"
 EMMA_LOOK_ID = "emma-wimbledon-tennis-v1"
+REFERENCE_PRESET_ID = "wimbledon-tennis-v1"
 
-TITLE = "Tap-Tap Tennis con Emma – Wimbledon"
+TITLE = "Emma gioca a tennis a Wimbledon – Tap-Tap!"
 THEME = "baby dance tennis a Wimbledon"
 HOOK = (
-    "Ace perde il ritmo del rimbalzo ed Emma glielo fa ritrovare con due "
-    "piccoli tap sul campo da tennis di Wimbledon"
+    "Emma insegna ad Ace a rimbalzare sulle corde, servire e superare la "
+    "rete sul campo in erba di Wimbledon"
 )
-TARGET_WORDS = ["tap-tap", "bounce", "low", "high", "Wimbledon"]
+TARGET_WORDS = ["tennis ball", "racket", "serve", "forehand", "Wimbledon"]
 FEATURED_CHARACTERS = ["Emma", "Ace"]
 
-MUSIC_DIRECTION = """136 BPM, polished modern electro-pop baby dance with an immediate two-beat “tap-tap” hook, springy bass, crisp handclaps, light tennis-ball percussion, bright synth plucks and a clean four-on-the-floor pulse. Adult female lead vocal in clear British English, energetic, smiling and rhythmically precise. Ace has one consistent short spoken voice used only for the line “I can do it too!”; no continuous children's choir. Verses should feel like a playful mini-story, the pre-chorus should briefly pull back, and every chorus should return with the same strong melodic hook. Avoid nursery-rhyme melody, stadium crowd noise, long introductions, orchestral scoring, dense vocal layers and improvised lyrics. Preserve every approved word exactly and end cleanly at 75 seconds."""
+MUSIC_DIRECTION = """136 BPM, polished modern electro-pop baby dance with an immediate two-beat “tap-tap” hook, springy bass, crisp handclaps, light tennis-ball percussion, bright synth plucks and a clean four-on-the-floor pulse. Adult female lead vocal in clear British English, energetic, smiling and rhythmically precise; use the same adult voice for the short spoken intro and outro. No character voice and no continuous children's choir. Verses should feel like a playful tennis mini-story, the pre-chorus should briefly pull back, and every chorus should return with the same strong melodic hook. Avoid nursery-rhyme melody, stadium crowd noise, long introductions, orchestral scoring, dense vocal layers and improvised lyrics. Preserve every approved word exactly and end cleanly at 75 seconds."""
 
 LYRICS = """[Spoken Intro]
 
-Oh!
+Ball on the grass!
 
-Ace forgot the beat!
+Racket in hand!
 
-Emma, can you help?
+Emma, are you ready?
 
 Tap-tap!
 
-Let's go!
+Let's play!
 
 [Chorus]
 
-Tap-tap, Ace, stay on the beat!
+Tap-tap, Ace, bounce on the strings!
 
-Bounce-bounce-bounce by Emma's feet!
+Up and down, watch how Emma swings!
 
-Low to the grass, high to the sky,
+Over the net, one, two, three!
 
-tap-tap tennis, give it a try!
+Tap-tap tennis, play with me!
 
 [Verse 1]
 
-Ace rolls slowly, quiet and round.
+Ace rolls slowly onto the court.
 
-Emma taps her racket on the ground.
+Emma lifts her racket for sport.
 
-One little tap, then tap number two.
+One small bounce, then number two.
 
-Ace starts bouncing: “I can do it too!”
+Up goes Ace, so bright and true!
 
 [Pre-Chorus]
 
-Hold it steady, watch it go.
+Hold it steady, watch the ball.
 
-Tap it gently, high then low.
+Tap it gently, not too tall.
 
 [Chorus]
 
-Tap-tap, Ace, stay on the beat!
+Tap-tap, Ace, bounce on the strings!
 
-Bounce-bounce-bounce by Emma's feet!
+Up and down, watch how Emma swings!
 
-Low to the grass, high to the sky,
+Over the net, one, two, three!
 
-tap-tap tennis, give it a try!
+Tap-tap tennis, play with me!
 
 [Verse 2]
 
-Ace hops left and Ace hops right.
+Forehand left and backhand right.
 
-Emma points with a smile so bright.
+Emma keeps the ball in sight.
 
-Under the racket, over the line.
+Over the net and on the line.
 
 Ace keeps bouncing right on time.
 
 [Dance Break]
 
-Tap your knees and touch your toes.
+Step to the left and touch the line.
 
-Turn around, then strike a pose.
+Step to the right, you're doing fine.
 
-Racket up and racket down.
+Racket ready, bend down low.
 
-Ace makes one small circle round.
+Swing up softly, watch Ace go!
 
 [Final Chorus]
 
-Tap-tap, Ace, stay on the beat!
+Tap-tap, Ace, bounce on the strings!
 
-Bounce-bounce-bounce by Emma's feet!
+Up and down, watch how Emma swings!
 
-Low to the grass, high to the sky,
+Over the net, one, two, three!
 
 Emma and Ace wave bye-bye!
 
 [Spoken Outro]
 
-Match point!
+Game!
+
+Set!
+
+Match!
 
 Tap-tap!"""
 
 
 _CONTINUITY_LOCK = (
-    "Continuity lock: exactly one Emma, one Ace and one racket; no other people "
-    "or characters. Emma must match reference 1 exactly: same face, green eyes, "
-    "baby proportions, high ponytail, headband, white-and-green dress, nappy "
-    "cover and shoes. Ace must match reference 2 exactly; never add or remove "
-    "features. The racket must match reference 1. Keep the same empty grass "
-    "court, net, lines and daylight from reference 3. Never change face, scale, "
-    "colors, wardrobe, props or layout. No logos, text, trophy, crowd or "
-    "confetti. "
+    "Continuity lock: exactly one Emma, one Ace tennis ball and one wooden "
+    "racket; no other people or characters. Reference 1 is the only Emma "
+    "identity and outfit. Reference 2 is the only Ace: one yellow-green felt "
+    "tennis ball with white seams and one tiny face, never a cloud, fluffy "
+    "mascot, animal, dinosaur or child; never duplicate or transform Ace. "
+    "Reference 3 is the same empty grass court. Keep face, scale, colors, "
+    "wardrobe, racket, court and daylight fixed. The racket may contact only "
+    "Ace. No cloud characters, extra people, crowd, trophy, confetti, text or "
+    "logos. "
 )
 
 
@@ -137,120 +143,120 @@ STORYBOARD: list[dict[str, Any]] = [
     {
         "index": 0,
         "duration_seconds": 8,
-        "word": "tap-tap",
-        "lyric_cue": "Ace forgot the beat!",
+        "word": "tennis ball",
+        "lyric_cue": "Ball on the grass!",
         "action": _action(
-            "Ace rests still beside the near baseline. Emma enters with two "
-            "small steps, stops beside him, points down, then taps the racket "
-            "head twice on the grass without touching Ace."
+            "Ace rests on the near baseline as a clearly visible tennis ball. "
+            "Emma walks in holding the racket, stops beside Ace, points to the "
+            "ball and raises the racket into a ready position."
         ),
         "shot": "stable medium-wide opening at child eye level with a very gentle push-in",
     },
     {
         "index": 1,
         "duration_seconds": 8,
-        "word": "stay on the beat",
-        "lyric_cue": "Tap-tap, Ace, stay on the beat!",
+        "word": "bounce on the strings",
+        "lyric_cue": "Tap-tap, Ace, bounce on the strings!",
         "action": _action(
-            "Emma holds the racket in both hands and makes two clear downward "
-            "taps on the same grass mark; Ace bounces twice beside her right "
-            "shoe and settles in the same place."
+            "Emma holds the racket face horizontal at waist height. Ace makes "
+            "exactly three gentle vertical bounces on the centre of the racket "
+            "strings; the racket touches the tennis ball on every bounce."
         ),
-        "shot": "front-facing full-body shot with a fixed camera and readable rhythm",
+        "shot": "stable front three-quarter full-body shot with racket and ball always visible",
     },
     {
         "index": 2,
         "duration_seconds": 8,
-        "word": "low and high",
-        "lyric_cue": "Low to the grass, high to the sky,",
+        "word": "serve",
+        "lyric_cue": "Over the net, one, two, three!",
         "action": _action(
-            "Emma lowers one open hand and then raises it slowly; Ace makes one "
-            "low bounce followed by one shoulder-high bounce, staying beside "
-            "Emma and never leaving the frame."
+            "Emma holds Ace in her free hand, tosses the tennis ball just above "
+            "her head, then makes one gentle overhead serve. The racket strings "
+            "contact Ace once and Ace travels visibly over the net."
         ),
-        "shot": "stable medium-wide shot with one restrained upward camera tilt",
+        "shot": "single stable side-wide shot showing Emma, contact point, net and ball flight",
     },
     {
         "index": 3,
         "duration_seconds": 8,
         "word": "roll",
-        "lyric_cue": "Ace rolls slowly, quiet and round.",
+        "lyric_cue": "Ace rolls slowly onto the court.",
         "action": _action(
-            "Ace rolls slowly along the near white baseline for one metre and "
-            "stops. Emma follows with three small steps, turns toward him and "
-            "keeps the racket low at her side."
+            "Ace rolls back under the net along the centre line and stops in "
+            "front of Emma. Emma follows the ball with her eyes, takes two small "
+            "tennis steps and lowers the racket beside Ace."
         ),
         "shot": "single lateral tracking shot at constant child-eye-level distance",
     },
     {
         "index": 4,
         "duration_seconds": 8,
-        "word": "one two",
-        "lyric_cue": "One little tap, then tap number two.",
+        "word": "forehand",
+        "lyric_cue": "Forehand left and backhand right.",
         "action": _action(
-            "Emma plants both feet, taps the racket head once on the left and "
-            "once on the right; Ace begins a steady two-bounce rhythm and ends "
-            "beside the same baseline."
+            "Ace makes one low bounce in front of Emma. Emma turns sideways and "
+            "plays one slow forehand: the centre of the racket strings gently "
+            "contacts Ace and sends the tennis ball over the net."
         ),
-        "shot": "locked full-body two-shot with no cut and no change of angle",
+        "shot": "locked side full-body shot showing preparation, contact and follow-through",
     },
     {
         "index": 5,
         "duration_seconds": 7,
-        "word": "high then low",
-        "lyric_cue": "Tap it gently, high then low.",
+        "word": "backhand",
+        "lyric_cue": "Emma keeps the ball in sight.",
         "action": _action(
-            "Emma holds the racket vertically and watches closely. Ace rises "
-            "once to racket-head height, descends into one small bounce and "
-            "stops while Emma smiles."
+            "Ace bounces back toward Emma at knee height. Emma watches the ball, "
+            "moves the racket across her body and plays one gentle backhand. The "
+            "racket strings contact Ace once and send him cleanly over the net."
         ),
-        "shot": "stable medium two-shot with a slow, minimal push-in",
+        "shot": "stable opposite-side full-body shot with the tennis ball visible throughout",
     },
     {
         "index": 6,
         "duration_seconds": 7,
-        "word": "bounce-bounce-bounce",
-        "lyric_cue": "Bounce-bounce-bounce by Emma's feet!",
+        "word": "mini rally",
+        "lyric_cue": "Ace keeps bouncing right on time.",
         "action": _action(
-            "Emma repeats the signature two taps in the same court position; "
-            "Ace performs exactly three small bounces beside her shoes while "
-            "Emma nods on each beat."
+            "Emma completes a tiny two-shot rally with Ace: one forehand racket "
+            "strings contact, one visible bounce on the far court, then one "
+            "backhand racket strings contact. Ace remains one tennis ball."
         ),
-        "shot": "front-facing medium-wide chorus shot with the camera locked off",
+        "shot": "single wide side view of the same court with no cut and no camera shake",
     },
     {
         "index": 7,
         "duration_seconds": 7,
-        "word": "left and right",
-        "lyric_cue": "Ace hops left and Ace hops right.",
+        "word": "tennis footwork",
+        "lyric_cue": "Step to the left and touch the line.",
         "action": _action(
-            "Ace makes one short hop left and one short hop right across a "
-            "single white line. Emma remains planted, points left and right, "
-            "then returns the racket to the same resting position."
+            "Emma keeps Ace balanced on the racket strings, takes one small step "
+            "left to touch the white line, then one small step right and returns "
+            "to the centre without dropping the tennis ball."
         ),
-        "shot": "stable full-body shot with a very small left-to-right pan",
+        "shot": "stable front full-body shot with a minimal left-to-right pan",
     },
     {
         "index": 8,
         "duration_seconds": 7,
-        "word": "tennis pose",
-        "lyric_cue": "Tap your knees and touch your toes.",
+        "word": "match point",
+        "lyric_cue": "Swing up softly, watch Ace go!",
         "action": _action(
-            "Emma taps both knees, bends once to touch her toes, turns only "
-            "halfway and freezes with the racket raised. Ace rolls in one small "
-            "circle on the grass and stops beside her."
+            "Emma bends her knees in a ready pose, gently tosses Ace and plays "
+            "one clear match-point serve. The racket contacts the tennis ball, "
+            "which crosses the net and bounces inside the service box."
         ),
-        "shot": "fixed full-body movement shot with no montage and no close-up",
+        "shot": "stable wide hero shot showing the full serve and marked landing point",
     },
     {
         "index": 9,
         "duration_seconds": 7,
-        "word": "match point",
+        "word": "game set match",
         "lyric_cue": "Emma and Ace wave bye-bye!",
         "action": _action(
-            "Emma returns to the centre mark, taps the grass once and raises "
-            "the racket in a clean final pose. Ace makes one final bounce, "
-            "settles beside her, and Emma waves directly to the camera."
+            "Emma returns to the centre mark and holds the racket horizontal. "
+            "Ace makes one final bounce onto the strings and stays there as a "
+            "tennis ball while Emma raises her free hand and waves to camera."
         ),
         "shot": "stable front-facing finale with a slow pull-back over the unchanged court",
     },
@@ -285,15 +291,15 @@ def _episode_values() -> dict[str, Any]:
 def _generation_metadata() -> dict[str, Any]:
     return {
         "format": "baby_dance",
-        "archetype": "errore_e_correzione",
-        "concept": "Ace perde il ritmo e lo ritrova seguendo i tap di Emma",
-        "gag": "Ace parte immobile e scopre un rimbalzo alla volta",
+        "archetype": "comandi",
+        "concept": "Emma e Ace eseguono veri gesti di tennis, dal palleggio al servizio",
+        "gag": "Ace impara a rimbalzare sulle corde senza mai cambiare personaggio",
         "progression": [
-            "Ace resta fermo accanto alla linea mentre Emma scopre il problema",
-            "Emma prova due tap e Ace risponde con due piccoli rimbalzi",
-            "Emma insegna ad Ace la differenza tra basso e alto",
-            "Ace completa la sequenza sinistra-destra senza perdere il ritmo",
-            "Emma e Ace chiudono sul punto centrale con un ultimo tap",
+            "Emma presenta Ace come una vera pallina da tennis sul campo",
+            "Emma fa rimbalzare Ace sulle corde della racchetta",
+            "Emma esegue un servizio che supera chiaramente la rete",
+            "Emma mostra un diritto, un rovescio e un piccolo scambio",
+            "Emma chiude con il match point e Ace fermo sulle corde",
         ],
     }
 
@@ -304,9 +310,14 @@ def _visual_consistency_metadata() -> dict[str, Any]:
         "characters": FEATURED_CHARACTERS,
         "single_world": True,
         "single_emma_look": EMMA_LOOK_ID,
+        "reference_preset_id": REFERENCE_PRESET_ID,
         "fixed_props": ["one wooden racket", "one tennis ball named Ace"],
         "forbidden_elements": [
             "extra people",
+            "cloud characters",
+            "fluffy mascots",
+            "dinosaurs",
+            "animals",
             "crowd",
             "trophy",
             "confetti",
@@ -329,44 +340,32 @@ def _destination_reference_pack_matches(
     }
     if set(assets) != {"emma", "friends", "world"}:
         return False
+    preset = get_reference_preset(REFERENCE_PRESET_ID)
     return all(
-        (assets[role].metadata_json or {}).get("source_episode_id")
-        == SOURCE_EPISODE_ID
+        (assets[role].metadata_json or {}).get("reference_preset_id")
+        == REFERENCE_PRESET_ID
+        and (assets[role].metadata_json or {}).get("source_sha256")
+        == preset.sha256_for(role)
         for role in ("friends", "world")
     )
 
 
-def _copy_source_reference_pack(
-    source_episode: Episode,
+def _apply_wimbledon_reference_pack(
     destination_episode: Episode,
     service: PipelineService,
 ) -> None:
-    source_assets = {
-        service.explicit_reference_role(asset): asset
-        for asset in service.reference_pack_assets(source_episode)
-    }
-    missing = {"emma", "friends", "world"} - set(source_assets)
-    if missing:
-        raise RuntimeError(
-            "The approved Wimbledon source reference pack is incomplete: "
-            + ", ".join(sorted(missing))
-        )
-
+    preset = get_reference_preset(REFERENCE_PRESET_ID)
     service.save_reference_pack(
         destination_episode,
         {
-            "emma": Path(source_assets["emma"].path),
-            "friends": Path(source_assets["friends"].path),
-            "world": Path(source_assets["world"].path),
+            "emma": Path("ignored-by-the-look-catalog.png"),
+            **preset.sources,
         },
         emma_look_id=EMMA_LOOK_ID,
         source_metadata={
             role: {
-                "source_episode_id": SOURCE_EPISODE_ID,
-                "source_asset_id": source_assets[role].id,
-                "source_sha256": (
-                    source_assets[role].metadata_json or {}
-                ).get("stored_sha256"),
+                "reference_preset_id": REFERENCE_PRESET_ID,
+                "source_sha256": preset.sha256_for(role),
             }
             for role in ("friends", "world")
         },
@@ -374,12 +373,6 @@ def _copy_source_reference_pack(
 
 
 def upsert_episode(db, settings: Settings) -> tuple[Episode, dict[str, Any]]:
-    source_episode = db.get(Episode, SOURCE_EPISODE_ID)
-    if source_episode is None:
-        raise RuntimeError(
-            f"Wimbledon source episode not found: {SOURCE_EPISODE_ID}"
-        )
-
     episode = db.scalar(
         select(Episode).where(Episode.working_slug == WORKING_SLUG)
     )
@@ -419,7 +412,7 @@ def upsert_episode(db, settings: Settings) -> tuple[Episode, dict[str, Any]]:
         service, episode
     )
     if reference_changed:
-        _copy_source_reference_pack(source_episode, episode, service)
+        _apply_wimbledon_reference_pack(episode, service)
         episode = db.scalar(
             select(Episode).where(Episode.working_slug == WORKING_SLUG)
         )

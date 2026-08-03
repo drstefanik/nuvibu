@@ -9,7 +9,6 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import Settings
 from app.database import Base
-from app.models import Episode
 from app.reference_presets import get_reference_preset
 from app.services.lyrics_engine import _verbs
 from app.services.pipeline import PipelineService
@@ -17,12 +16,11 @@ from app.services.safety import _sung_meter_profile
 from scripts.create_wimbledon_consistency_episode import (
     EMMA_LOOK_ID,
     LYRICS,
-    SOURCE_EPISODE_ID,
+    REFERENCE_PRESET_ID,
     STORYBOARD,
     WORKING_SLUG,
     upsert_episode,
 )
-from scripts.patch_wimbledon_episode import LYRICS as PREVIOUS_WIMBLEDON_LYRICS
 
 
 def _settings(tmp_path: Path) -> Settings:
@@ -44,38 +42,6 @@ def _session(settings: Settings):
     )
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-def _source_episode(db, settings: Settings) -> Episode:
-    source = Episode(
-        id=SOURCE_EPISODE_ID,
-        title="Game Set Match con Emma",
-        working_slug="game-set-match-con-emma",
-        age_min_months=9,
-        age_max_months=36,
-        theme="baby dance tennis a Wimbledon",
-        hook="Emma e Ace giocano a tennis sul campo in erba",
-        target_words=["game", "set", "match", "Wimbledon"],
-        featured_characters=["Emma", "Ace"],
-        duration_seconds=75,
-        bpm=148,
-        visual_pacing="energetic",
-        language="en",
-        lyrics_text=PREVIOUS_WIMBLEDON_LYRICS,
-        concept_json={"emma_look_id": EMMA_LOOK_ID},
-    )
-    db.add(source)
-    db.commit()
-    preset = get_reference_preset("nanna-arcobaleno-v1")
-    PipelineService(db, settings).save_reference_pack(
-        source,
-        {
-            "emma": Path("ignored-by-the-look-catalog.png"),
-            **preset.sources,
-        },
-        emma_look_id=EMMA_LOOK_ID,
-    )
-    return source
 
 
 def test_wimbledon_consistency_script_loads_from_an_isolated_workdir(
@@ -107,7 +73,9 @@ def test_wimbledon_consistency_content_is_structurally_safe() -> None:
     assert all(str(scene["lyric_cue"]) in LYRICS for scene in STORYBOARD)
     assert all(3 <= len(str(scene["action"])) <= 800 for scene in STORYBOARD)
     assert all("exactly one Emma" in str(scene["action"]) for scene in STORYBOARD)
-    assert all("No logos, text, trophy, crowd" in str(scene["action"]) for scene in STORYBOARD)
+    assert all("No cloud characters" in str(scene["action"]) for scene in STORYBOARD)
+    assert all("never a cloud" in str(scene["action"]) for scene in STORYBOARD)
+    assert sum("racket strings" in str(scene["action"]) for scene in STORYBOARD) >= 5
 
     meter = _sung_meter_profile(LYRICS)
     assert meter["syllables"]
@@ -117,9 +85,13 @@ def test_wimbledon_consistency_content_is_structurally_safe() -> None:
     detected = set(_verbs(" ".join(str(scene["action"]) for scene in STORYBOARD)))
     assert {
         "bounce",
+        "follow",
+        "move",
         "point",
         "raise",
         "roll",
+        "serve",
+        "toss",
         "touch",
         "turn",
         "wave",
@@ -133,9 +105,9 @@ def test_release_creates_approved_episode_and_copies_reference_pack(
     Session = _session(settings)
 
     with Session() as db:
-        _source_episode(db, settings)
         episode, changes = upsert_episode(db, settings)
         service = PipelineService(db, settings)
+        preset = get_reference_preset(REFERENCE_PRESET_ID)
 
         assert episode.working_slug == WORKING_SLUG
         assert changes["created"] is True
@@ -153,8 +125,27 @@ def test_release_creates_approved_episode_and_copies_reference_pack(
         assert all(
             "no flashing" in str(scene["prompt"]).casefold()
             and "no frightening" in str(scene["prompt"]).casefold()
+            and "never add a default cloud companion" in str(scene["prompt"]).casefold()
             for scene in episode.storyboard_json
         )
+        assets = {
+            service.explicit_reference_role(asset): asset
+            for asset in service.reference_pack_assets(episode)
+        }
+        assert {
+            role: (assets[role].metadata_json or {})["reference_preset_id"]
+            for role in ("friends", "world")
+        } == {
+            "friends": REFERENCE_PRESET_ID,
+            "world": REFERENCE_PRESET_ID,
+        }
+        assert {
+            role: (assets[role].metadata_json or {})["source_sha256"]
+            for role in ("friends", "world")
+        } == {
+            role: preset.sha256_for(role)
+            for role in ("friends", "world")
+        }
 
         same_episode, second_changes = upsert_episode(db, settings)
         assert same_episode.id == episode.id

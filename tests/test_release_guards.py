@@ -206,6 +206,7 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
         def __init__(self):
             self.calls = 0
             self.prompts: list[str] = []
+            self.seeds: list[int] = []
 
         def generate(
             self,
@@ -213,10 +214,12 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
             output_path: Path,
             duration_seconds: int,
             prompt: str,
+            seed: int,
             **_kwargs,
         ):
             self.calls += 1
             self.prompts.append(prompt)
+            self.seeds.append(seed)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(b"video")
             return VideoResult(
@@ -265,6 +268,11 @@ def test_scene_generation_is_resumable_without_duplicate_provider_calls(
             "Nuvibù is the name of the platform" in prompt
             for prompt in provider.prompts
         )
+        assert all(
+            "never add a default cloud companion" in prompt
+            for prompt in provider.prompts
+        )
+        assert provider.seeds == [173] * len(episode.storyboard_json)
         assert all(look.outfit_prompt in prompt for prompt in provider.prompts)
         assert all(
             "locked candy-pink outfit" not in prompt

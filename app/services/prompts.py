@@ -12,16 +12,14 @@ SECTION_RE = re.compile(r"^\[([^\]]+)\]\s*$")
 EMMA_VISUAL_GUARD = (
     "Emma is the recurring main character and must be clearly visible for the "
     "entire scene, leading the primary action. Keep her identical to the "
-    "approved Emma reference: nine-month-old baby proportions, large "
-    "grey-green eyes, round rosy cheeks, warm light skin, thick dark "
-    "chestnut-brown hair with one high playful ponytail tied in pastel pink, "
-    "with the exact face, hair silhouette and proportions shown in reference "
-    "image 1. Preserve exactly the single approved outfit shown in reference "
-    "image 1 for the whole episode; never mix garments or colors from another "
-    "Emma look. Nuvibù is the name of the "
-    "platform and channel, not a character. The small plush white cloud is "
-    "Emma's secondary friend and must never replace, obscure or visually "
-    "dominate her. "
+    "approved Emma reference: nine-month-old baby proportions, large green-grey "
+    "eyes, round rosy cheeks, warm light skin and the exact face, hair silhouette, "
+    "hair accessories and proportions shown in reference image 1. Preserve "
+    "exactly the single approved outfit shown in reference image 1 for the whole "
+    "episode; never mix garments, accessories or colors from another Emma look. "
+    "Nuvibù is the name of the platform and channel, not a character. Show only "
+    "the characters explicitly named for this episode; never add a default cloud "
+    "companion, mascot, animal, child or background person. "
 )
 
 

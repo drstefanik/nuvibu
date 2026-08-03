@@ -32,6 +32,8 @@ REFERENCE_PACK_IMAGES = (
     Path("reference-packs/la-fattoria/03-mondo-episodio.png"),
     Path("reference-packs/nanna-arcobaleno/02-amici-elementi-episodio.png"),
     Path("reference-packs/nanna-arcobaleno/03-mondo-episodio.png"),
+    Path("reference-packs/wimbledon-tennis/02-ace-tennis-ball.png"),
+    Path("reference-packs/wimbledon-tennis/03-mondo-wimbledon-vuoto.png"),
 )
 
 
