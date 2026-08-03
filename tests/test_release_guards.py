@@ -78,6 +78,25 @@ def test_production_configuration_fails_closed_by_default():
     assert any("GEMINI_API_KEY" in error for error in gemini_worker_errors)
 
 
+def test_maintenance_production_configuration_requires_only_shared_runtime_inputs(
+    tmp_path: Path, monkeypatch
+):
+    mount = tmp_path / "nuvibu"
+    mount.mkdir()
+    monkeypatch.setattr("app.config.os.path.ismount", lambda path: path == mount)
+    settings = Settings(
+        app_env="production",
+        runtime_role="maintenance",
+        database_url="postgresql://example.test/neondb",
+        storage_root=mount,
+        storage_backend="gcs_mount",
+        provider_mode="live",
+    )
+
+    assert settings.production_errors(require_dispatch=False) == []
+    settings.validate_production(require_dispatch=False)
+
+
 def test_production_budget_keeps_episode_cap_and_disables_daily_cap():
     settings = Settings()
     deploy_script = (

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
 
 from sqlalchemy import create_engine
@@ -12,6 +14,28 @@ from app.services.lyrics_engine import _verbs
 from app.services.pipeline import PipelineService
 from app.services.safety import _sung_meter_profile
 from scripts.patch_wimbledon_episode import EMMA_LOOK_ID, LYRICS, STORYBOARD
+
+
+def test_wimbledon_patch_can_load_when_invoked_by_file_path(tmp_path: Path) -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "patch_wimbledon_episode.py"
+    )
+    command = (
+        "import runpy; "
+        f"runpy.run_path({str(script)!r}, run_name='editorial_patch_import_test')"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", command],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_english_visual_verbs_are_recognised() -> None:

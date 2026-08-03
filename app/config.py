@@ -14,7 +14,7 @@ class Settings(BaseSettings):
 
     app_name: str = "Nuvibù Studio"
     app_env: Literal["development", "test", "production"] = "development"
-    runtime_role: Literal["web", "worker"] = "web"
+    runtime_role: Literal["web", "worker", "maintenance"] = "web"
     app_base_url: str = "http://localhost:8000"
     secret_key: str = "development-only-change-me"
     admin_username: str | None = None

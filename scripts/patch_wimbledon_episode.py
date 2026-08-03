@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 from typing import Any
+
+# Cloud Run invokes maintenance scripts by file path, which otherwise places
+# only /app/scripts on sys.path and makes the sibling app package unavailable.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.config import get_settings
 from app.database import SessionLocal
